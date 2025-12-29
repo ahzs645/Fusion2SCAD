@@ -1259,23 +1259,25 @@ def run(context):
         # Check if command already exists
         cmd_def = ui.commandDefinitions.itemById(COMMAND_ID)
 
-        if not cmd_def:
-            # Create command definition with icon
-            # Icon should be in resources folder (16x16, 32x32 PNG)
-            resources_folder = os.path.join(script_dir, 'resources')
-            if not os.path.exists(resources_folder):
-                resources_folder = ''
+        if cmd_def:
+            cmd_def.deleteMe()
 
-            cmd_def = ui.commandDefinitions.addButtonDefinition(
-                COMMAND_ID,
-                COMMAND_NAME,
-                COMMAND_DESCRIPTION,
-                resources_folder
-            )
-            command_definitions.append(cmd_def)
+        # Create command definition with icon
+        # Icon should be in resources folder (16x16, 32x32 PNG)
+        resources_folder = os.path.join(script_dir, 'resources')
+        if not os.path.exists(resources_folder):
+            resources_folder = ''
 
-            # Set tooltip
-            cmd_def.tooltip = COMMAND_DESCRIPTION
+        cmd_def = ui.commandDefinitions.addButtonDefinition(
+            COMMAND_ID,
+            COMMAND_NAME,
+            COMMAND_DESCRIPTION,
+            resources_folder
+        )
+        command_definitions.append(cmd_def)
+
+        # Set tooltip
+        cmd_def.tooltip = COMMAND_DESCRIPTION
 
         # Connect to command created event
         on_command_created = ExportCommandCreatedHandler()
