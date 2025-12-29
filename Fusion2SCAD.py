@@ -261,28 +261,32 @@ class SCADExporter:
                 # Get sketch transform (3D orientation)
                 transform = sketch.transform
                 if transform:
-                    # Extract the Z-axis (normal) from the transform matrix
-                    # This tells us which direction the extrusion goes
-                    z_axis = transform.getAsCoordinateSystem()[3]  # Get Z-axis direction
+                    # Get full coordinate system
+                    cs = transform.getAsCoordinateSystem()
+                    origin_pt, x_axis, y_axis, z_axis = cs
+
+                    # Store full transform for multmatrix
+                    result['sketch_transform'] = {
+                        'origin': (origin_pt.x, origin_pt.y, origin_pt.z),
+                        'x_axis': (x_axis.x, x_axis.y, x_axis.z),
+                        'y_axis': (y_axis.x, y_axis.y, y_axis.z),
+                        'z_axis': (z_axis.x, z_axis.y, z_axis.z)
+                    }
+
                     result['plane_normal'] = (z_axis.x, z_axis.y, z_axis.z)
 
-                    # Determine the plane type for simpler cases
+                    # Determine the plane type for labeling
                     nx, ny, nz = z_axis.x, z_axis.y, z_axis.z
                     tolerance = 0.001
 
                     if abs(nz - 1) < tolerance or abs(nz + 1) < tolerance:
                         result['sketch_plane'] = 'XY'
-                        result['rotation'] = None if nz > 0 else (180, 0, 0)
                     elif abs(ny - 1) < tolerance or abs(ny + 1) < tolerance:
                         result['sketch_plane'] = 'XZ'
-                        result['rotation'] = (-90, 0, 0) if ny > 0 else (90, 0, 0)
                     elif abs(nx - 1) < tolerance or abs(nx + 1) < tolerance:
                         result['sketch_plane'] = 'YZ'
-                        result['rotation'] = (0, 90, 0) if nx > 0 else (0, -90, 0)
                     else:
                         result['sketch_plane'] = 'CUSTOM'
-                        # For custom planes, calculate rotation from normal
-                        result['rotation'] = self._normal_to_rotation(nx, ny, nz)
         except Exception as e:
             # If we can't get plane info, assume XY plane
             pass
@@ -474,38 +478,79 @@ class SCADExporter:
         return result
 
     def _generate_transform_prefix(self, feature_info: dict, profile_center: tuple) -> list:
-        """Generate translate/rotate prefix for proper 3D positioning"""
+        """Generate multmatrix transform for proper 3D positioning using sketch transform."""
         lines = []
         indent = ""
-
-        # Get plane origin and rotation
-        plane_origin = feature_info.get('plane_origin', (0, 0, 0))
-        rotation = feature_info.get('rotation')
         cx, cy = profile_center
 
-        # Calculate full translation (plane origin + profile center in plane)
-        ox, oy, oz = plane_origin
+        # Get the full sketch transform if available
+        sketch_transform = feature_info.get('sketch_transform')
 
-        # Apply rotation if needed (non-XY plane)
-        if rotation and rotation != (0, 0, 0):
-            rx, ry, rz = rotation
-            # Translate to plane origin, then rotate, then translate in local coords
-            if ox != 0 or oy != 0 or oz != 0:
-                lines.append(f"translate([{self._format_value(ox)}, {self._format_value(oy)}, {self._format_value(oz)}])")
-                indent = "    "
-            lines.append(f"{indent}rotate([{self._format_value(rx)}, {self._format_value(ry)}, {self._format_value(rz)}])")
-            indent += "    "
-            if cx != 0 or cy != 0:
-                lines.append(f"{indent}translate([{self._format_value(cx)}, {self._format_value(cy)}, 0])")
-                indent += "    "
+        if sketch_transform:
+            # Use multmatrix for precise transformation
+            # The sketch transform gives us: origin, x_axis, y_axis, z_axis
+            # We build a 4x4 transformation matrix
+            ox, oy, oz = sketch_transform['origin']
+            xx, xy, xz = sketch_transform['x_axis']
+            yx, yy, yz = sketch_transform['y_axis']
+            zx, zy, zz = sketch_transform['z_axis']
+
+            # Convert origin to mm (axes are unit vectors, don't convert)
+            ox, oy, oz = ox * CM_TO_MM, oy * CM_TO_MM, oz * CM_TO_MM
+
+            # Include profile center in the translation
+            # The profile center (cx, cy) is in sketch-local 2D coordinates
+            # We need to transform it through the rotation part of the matrix
+            # New origin = original_origin + rotation_matrix * [cx, cy, 0]
+            tx = ox + xx * cx + yx * cy
+            ty = oy + xy * cx + yy * cy
+            tz = oz + xz * cx + yz * cy
+
+            # Build the 4x4 matrix (column-major for OpenSCAD)
+            # [xx, yx, zx, tx]
+            # [xy, yy, zy, ty]
+            # [xz, yz, zz, tz]
+            # [0,  0,  0,  1 ]
+            matrix = [
+                [xx, yx, zx, tx],
+                [xy, yy, zy, ty],
+                [xz, yz, zz, tz],
+                [0, 0, 0, 1]
+            ]
+
+            # Format matrix for OpenSCAD
+            matrix_str = "[\n"
+            for row in matrix:
+                row_str = ", ".join(self._format_value(v) for v in row)
+                matrix_str += f"        [{row_str}],\n"
+            matrix_str = matrix_str.rstrip(",\n") + "\n    ]"
+
+            lines.append(f"multmatrix({matrix_str})")
+            indent = "    "
         else:
-            # XY plane - just translate
-            total_x = ox + cx
-            total_y = oy + cy
-            total_z = oz
-            if total_x != 0 or total_y != 0 or total_z != 0:
-                lines.append(f"translate([{self._format_value(total_x)}, {self._format_value(total_y)}, {self._format_value(total_z)}])")
-                indent = "    "
+            # Fallback to old rotation method
+            plane_origin = feature_info.get('plane_origin', (0, 0, 0))
+            rotation = feature_info.get('rotation')
+            cx, cy = profile_center
+            ox, oy, oz = plane_origin
+
+            if rotation and rotation != (0, 0, 0):
+                rx, ry, rz = rotation
+                if ox != 0 or oy != 0 or oz != 0:
+                    lines.append(f"translate([{self._format_value(ox)}, {self._format_value(oy)}, {self._format_value(oz)}])")
+                    indent = "    "
+                lines.append(f"{indent}rotate([{self._format_value(rx)}, {self._format_value(ry)}, {self._format_value(rz)}])")
+                indent += "    "
+                if cx != 0 or cy != 0:
+                    lines.append(f"{indent}translate([{self._format_value(cx)}, {self._format_value(cy)}, 0])")
+                    indent += "    "
+            else:
+                total_x = ox + cx
+                total_y = oy + cy
+                total_z = oz
+                if total_x != 0 or total_y != 0 or total_z != 0:
+                    lines.append(f"translate([{self._format_value(total_x)}, {self._format_value(total_y)}, {self._format_value(total_z)}])")
+                    indent = "    "
 
         return lines, indent
 
