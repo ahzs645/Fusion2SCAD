@@ -3,6 +3,7 @@
 
 import sys
 import os
+import math
 
 from .utils import CM_TO_MM, format_value
 
@@ -249,14 +250,16 @@ def generate_revolve_scad(feature_info: dict, feature_name: str) -> list:
 
 
 def generate_hole_scad(feature_info: dict, feature_name: str) -> list:
-    """Generate BOSL2 code for holes"""
+    """Generate BOSL2 code for holes including countersink and counterbore"""
     lines = []
 
-    radius = format_value(feature_info['diameter'] / 2)
+    diameter = feature_info['diameter']
+    radius = format_value(diameter / 2)
     depth = feature_info['depth']
     matrix = feature_info.get('matrix')
+    hole_type = feature_info.get('hole_type', 'simple')
 
-    lines.append(f"// {feature_name}")
+    lines.append(f"// {feature_name} ({hole_type})")
 
     for x, y, z in feature_info['positions']:
         epsilon = 1.0
@@ -272,7 +275,45 @@ def generate_hole_scad(feature_info: dict, feature_name: str) -> list:
             matrix_str = matrix_str.rstrip(",\n") + "\n    ]"
             lines.append(f"    multmatrix({matrix_str})")
 
-        lines.append(f"    translate([0, 0, -{epsilon}])")
-        lines.append(f"    cyl(h={total_h}, r={radius}, anchor=BOTTOM);")
+        indent = "    "
+
+        if hole_type == 'countersink':
+            cs_diameter = feature_info.get('countersink_diameter', diameter * 2)
+            cs_angle = feature_info.get('countersink_angle', 90)
+            cs_radius = cs_diameter / 2
+            # Calculate countersink depth from angle and radius difference
+            # For a 90° countersink: depth = radius_diff
+            # For other angles: depth = radius_diff / tan(angle/2)
+            radius_diff = cs_radius - (diameter / 2)
+            half_angle_rad = math.radians(cs_angle / 2)
+            cs_depth = radius_diff / math.tan(half_angle_rad) if half_angle_rad > 0 else radius_diff
+
+            lines.append(f"{indent}union() {{")
+            lines.append(f"{indent}    // Main hole")
+            lines.append(f"{indent}    translate([0, 0, -{epsilon}])")
+            lines.append(f"{indent}        cyl(h={total_h}, r={radius}, anchor=BOTTOM);")
+            lines.append(f"{indent}    // Countersink cone")
+            lines.append(f"{indent}    translate([0, 0, -{format_value(cs_depth)}])")
+            lines.append(f"{indent}        cyl(h={format_value(cs_depth + epsilon)}, r1={format_value(cs_radius)}, r2={radius}, anchor=BOTTOM);")
+            lines.append(f"{indent}}}")
+
+        elif hole_type == 'counterbore':
+            cb_diameter = feature_info.get('counterbore_diameter', diameter * 1.5)
+            cb_depth = feature_info.get('counterbore_depth', 2)
+            cb_radius = format_value(cb_diameter / 2)
+
+            lines.append(f"{indent}union() {{")
+            lines.append(f"{indent}    // Main hole")
+            lines.append(f"{indent}    translate([0, 0, -{epsilon}])")
+            lines.append(f"{indent}        cyl(h={total_h}, r={radius}, anchor=BOTTOM);")
+            lines.append(f"{indent}    // Counterbore")
+            lines.append(f"{indent}    translate([0, 0, -{format_value(cb_depth)}])")
+            lines.append(f"{indent}        cyl(h={format_value(cb_depth + epsilon)}, r={cb_radius}, anchor=BOTTOM);")
+            lines.append(f"{indent}}}")
+
+        else:
+            # Simple hole
+            lines.append(f"{indent}translate([0, 0, -{epsilon}])")
+            lines.append(f"{indent}cyl(h={total_h}, r={radius}, anchor=BOTTOM);")
 
     return lines

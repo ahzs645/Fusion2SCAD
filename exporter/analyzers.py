@@ -269,15 +269,37 @@ def analyze_hole_feature(feature: adsk.fusion.HoleFeature) -> dict:
     """Analyze a hole feature by inspecting its geometry"""
     result = {
         'type': 'hole',
+        'hole_type': 'simple',  # simple, countersink, counterbore
         'diameter': 0,
         'depth': 50,
         'positions': [],
-        'matrix': None
+        'matrix': None,
+        # Countersink specific
+        'countersink_angle': 90,
+        'countersink_diameter': 0,
+        # Counterbore specific
+        'counterbore_diameter': 0,
+        'counterbore_depth': 0
     }
 
     try:
         if feature.holeDiameter:
             result['diameter'] = feature.holeDiameter.value * CM_TO_MM
+
+        # Detect hole type
+        hole_type = feature.holeType
+        if hole_type == adsk.fusion.HoleTypes.CountersinkHoleType:
+            result['hole_type'] = 'countersink'
+            if feature.countersinkAngle:
+                result['countersink_angle'] = math.degrees(feature.countersinkAngle.value)
+            if feature.countersinkDiameter:
+                result['countersink_diameter'] = feature.countersinkDiameter.value * CM_TO_MM
+        elif hole_type == adsk.fusion.HoleTypes.CounterboreHoleType:
+            result['hole_type'] = 'counterbore'
+            if feature.counterboreDiameter:
+                result['counterbore_diameter'] = feature.counterboreDiameter.value * CM_TO_MM
+            if feature.counterboreDepth:
+                result['counterbore_depth'] = feature.counterboreDepth.value * CM_TO_MM
 
         extent = feature.extentDefinition
         if isinstance(extent, adsk.fusion.DistanceExtentDefinition):

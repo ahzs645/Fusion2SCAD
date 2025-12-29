@@ -66,7 +66,7 @@ difference() {
     ])
             cuboid([5, 5, 1.5], anchor=BOTTOM);
     }
-    // Hole1
+    // Hole1 (countersink)
     translate([33.719, 0, 12.1817])
         multmatrix([
         [0, 1, 0, 0],
@@ -74,6 +74,12 @@ difference() {
         [1, 0, 0, 0],
         [0, 0, 0, 1]
     ])
-        translate([0, 0, -1.0])
-        cyl(h=7, r=2.25, anchor=BOTTOM);
+        union() {
+            // Main hole
+            translate([0, 0, -1.0])
+                cyl(h=7, r=2.25, anchor=BOTTOM);
+            // Countersink cone
+            translate([0, 0, -1.75])
+                cyl(h=2.75, r1=4, r2=2.25, anchor=BOTTOM);
+        }
 }
