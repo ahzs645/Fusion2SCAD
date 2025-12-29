@@ -500,27 +500,41 @@ class SCADExporter:
             elif isinstance(extent, adsk.fusion.ThroughAllExtentDefinition):
                 result['depth'] = 200 # Sufficiently large for most parts
 
-            # Analyze faces to find position and orientation
+            # Determine position and orientation
+            # Prefer explicit position from feature if available
+            start_pos = None
+            if feature.position:
+                p = feature.position
+                start_pos = (p.x * CM_TO_MM, p.y * CM_TO_MM, p.z * CM_TO_MM)
+
+            # Analyze faces to find axis and confirm position
             faces = feature.faces
             for i in range(faces.count):
                 face = faces.item(i)
                 geom = face.geometry
                 if isinstance(geom, adsk.core.Cylinder):
-                    # Found a cylinder geometry
                     origin = geom.origin
                     axis = geom.axis
                     
-                    # Store position
-                    result['positions'].append((
-                        origin.x * CM_TO_MM,
-                        origin.y * CM_TO_MM,
-                        origin.z * CM_TO_MM
-                    ))
+                    # If we didn't get a position from the feature, use the geometry origin
+                    if not start_pos:
+                        start_pos = (
+                            origin.x * CM_TO_MM,
+                            origin.y * CM_TO_MM,
+                            origin.z * CM_TO_MM
+                        )
                     
                     # Store rotation (calculate once)
                     if result['rotation'] == (0, 0, 0):
                         result['axis'] = (axis.x, axis.y, axis.z)
                         result['rotation'] = self._normal_to_rotation(axis.x, axis.y, axis.z)
+                        
+                    # Stop after finding the first valid cylinder to avoid duplicates from counterbores
+                    break
+            
+            if start_pos:
+                result['positions'].append(start_pos)
+
         except:
             pass
             
@@ -532,24 +546,31 @@ class SCADExporter:
         
         diameter = self._format_value(feature_info['diameter'])
         radius = self._format_value(feature_info['diameter'] / 2)
-        depth = self._format_value(feature_info['depth'])
+        depth = feature_info['depth']
         rx, ry, rz = feature_info['rotation']
         
         lines.append(f"// {feature_name}")
         
         for x, y, z in feature_info['positions']:
-            # Position and rotate the cylinder
-            # We use anchor=CENTER to ensure it cuts through regardless of slight alignment issues
-            # But we shift it by depth/2 in the direction of the axis to match Fusion's start-point logic?
-            # Actually, Fusion's cylinder origin is the base.
-            # So we should probably anchor at BOTTOM.
+            # Create a cutter that is slightly longer to avoid z-fighting
+            # We shift it 'back' by epsilon and increase length by 2*epsilon
+            epsilon = 1.0 
+            total_h = self._format_value(depth + epsilon)
+            
+            # Note: cylinder orientation is tricky. 
+            # We assume the rotation aligns the cylinder axis correctly.
+            # We anchor at TOP to cut "down" from the point, or BOTTOM to cut "up"?
+            # Standard Fusion holes usually go "into" the material (negative normal).
+            # If we anchor at CENTER, we need to know the midpoint.
+            # Let's try anchoring at BOTTOM (base) but shift Z by -epsilon
             
             lines.append(f"translate([{self._format_value(x)}, {self._format_value(y)}, {self._format_value(z)}])")
             if rx != 0 or ry != 0 or rz != 0:
                 lines.append(f"    rotate([{self._format_value(rx)}, {self._format_value(ry)}, {self._format_value(rz)}])")
-                lines.append(f"    cyl(h={depth}, r={radius}, anchor=BOTTOM);")
-            else:
-                lines.append(f"    cyl(h={depth}, r={radius}, anchor=BOTTOM);")
+            
+            # Translate 'down' slightly along Z (local) to start the cut before the surface
+            lines.append(f"    translate([0, 0, -{epsilon}])")
+            lines.append(f"    cyl(h={total_h}, r={radius}, anchor=BOTTOM);")
             
         return lines
 
