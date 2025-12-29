@@ -477,6 +477,82 @@ class SCADExporter:
 
         return result
 
+    def analyze_hole_feature(self, feature: adsk.fusion.HoleFeature) -> dict:
+        """Analyze a hole feature by inspecting its geometry"""
+        result = {
+            'type': 'hole',
+            'diameter': 0,
+            'depth': 50,
+            'positions': [],
+            'rotation': (0, 0, 0),
+            'axis': (0, 0, 1)
+        }
+
+        try:
+            # Get diameter
+            if feature.holeDiameter:
+                result['diameter'] = feature.holeDiameter.value * CM_TO_MM
+
+            # Get depth from extent
+            extent = feature.extentDefinition
+            if isinstance(extent, adsk.fusion.DistanceExtentDefinition):
+                result['depth'] = extent.distance.value * CM_TO_MM
+            elif isinstance(extent, adsk.fusion.ThroughAllExtentDefinition):
+                result['depth'] = 200 # Sufficiently large for most parts
+
+            # Analyze faces to find position and orientation
+            faces = feature.faces
+            for i in range(faces.count):
+                face = faces.item(i)
+                geom = face.geometry
+                if isinstance(geom, adsk.core.Cylinder):
+                    # Found a cylinder geometry
+                    origin = geom.origin
+                    axis = geom.axis
+                    
+                    # Store position
+                    result['positions'].append((
+                        origin.x * CM_TO_MM,
+                        origin.y * CM_TO_MM,
+                        origin.z * CM_TO_MM
+                    ))
+                    
+                    # Store rotation (calculate once)
+                    if result['rotation'] == (0, 0, 0):
+                        result['axis'] = (axis.x, axis.y, axis.z)
+                        result['rotation'] = self._normal_to_rotation(axis.x, axis.y, axis.z)
+        except:
+            pass
+            
+        return result
+
+    def generate_hole_scad(self, feature_info: dict, feature_name: str) -> list:
+        """Generate BOSL2 code for holes"""
+        lines = []
+        
+        diameter = self._format_value(feature_info['diameter'])
+        radius = self._format_value(feature_info['diameter'] / 2)
+        depth = self._format_value(feature_info['depth'])
+        rx, ry, rz = feature_info['rotation']
+        
+        lines.append(f"// {feature_name}")
+        
+        for x, y, z in feature_info['positions']:
+            # Position and rotate the cylinder
+            # We use anchor=CENTER to ensure it cuts through regardless of slight alignment issues
+            # But we shift it by depth/2 in the direction of the axis to match Fusion's start-point logic?
+            # Actually, Fusion's cylinder origin is the base.
+            # So we should probably anchor at BOTTOM.
+            
+            lines.append(f"translate([{self._format_value(x)}, {self._format_value(y)}, {self._format_value(z)}])")
+            if rx != 0 or ry != 0 or rz != 0:
+                lines.append(f"    rotate([{self._format_value(rx)}, {self._format_value(ry)}, {self._format_value(rz)}])")
+                lines.append(f"    cyl(h={depth}, r={radius}, anchor=BOTTOM);")
+            else:
+                lines.append(f"    cyl(h={depth}, r={radius}, anchor=BOTTOM);")
+            
+        return lines
+
     def _generate_transform_prefix(self, feature_info: dict, profile_center: tuple) -> list:
         """Generate multmatrix transform for proper 3D positioning using sketch transform."""
         lines = []
@@ -748,6 +824,11 @@ class SCADExporter:
                     except:
                         pass
 
+                elif isinstance(entity, adsk.fusion.HoleFeature):
+                    info = self.analyze_hole_feature(entity)
+                    features_data.append((entity, feature_name, info, 'hole'))
+                    # Holes are usually subtractive, don't create bodies to track modifiers for
+
                 elif isinstance(entity, adsk.fusion.FilletFeature):
                     info = self.analyze_fillet_feature(entity)
                     # Associate fillet with affected bodies
@@ -807,6 +888,10 @@ class SCADExporter:
                 elif feature_type == 'revolve':
                     code = self.generate_revolve_scad(info, feature_name)
                     current_ops['union'].extend(code)
+
+                elif feature_type == 'hole':
+                    code = self.generate_hole_scad(info, feature_name)
+                    current_ops['difference'].extend(code)
 
             except Exception as e:
                 scad_code.append(f"// Error generating {feature_name}: {str(e)}")
@@ -997,6 +1082,21 @@ class SCADExporter:
                     }
                     feature_data['details']['operation'] = op_map.get(entity.operation, str(entity.operation))
 
+                elif isinstance(entity, adsk.fusion.HoleFeature):
+                    if entity.holeDiameter:
+                        feature_data['details']['diameter'] = entity.holeDiameter.value * CM_TO_MM
+                    
+                    # Hole type
+                    types = {
+                        0: 'SimpleHole', 1: 'CounterboreHole', 2: 'CountersinkHole'
+                    }
+                    feature_data['details']['hole_type'] = types.get(entity.holeType, str(entity.holeType))
+                    
+                    # Position if available
+                    if entity.position:
+                         p = entity.position
+                         feature_data['details']['position'] = {'x': p.x * CM_TO_MM, 'y': p.y * CM_TO_MM, 'z': p.z * CM_TO_MM}
+
                 elif isinstance(entity, adsk.fusion.Sketch):
                     feature_data['details']['profile_count'] = entity.profiles.count
                     feature_data['details']['curve_count'] = entity.sketchCurves.count
@@ -1059,7 +1159,14 @@ class ExportCommandExecuteHandler(adsk.core.CommandEventHandler):
             file_dialog.isMultiSelectEnabled = False
             file_dialog.title = "Export to OpenSCAD (BOSL2)"
             file_dialog.filter = "OpenSCAD files (*.scad)"
-            file_dialog.initialFilename = design.rootComponent.name + ".scad"
+            
+            # Generate timestamped filename (like screenshots)
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d at %I.%M.%S %p")
+            file_dialog.initialFilename = f"{design.rootComponent.name} {timestamp}.scad"
+            
+            # Default to Desktop
+            file_dialog.initialDirectory = os.path.expanduser("~/Desktop")
 
             dialog_result = file_dialog.showSave()
 
