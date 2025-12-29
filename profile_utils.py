@@ -106,6 +106,9 @@ def extract_profile_polygon(profile: adsk.fusion.Profile, arc_segments: int = 16
     """
     Extract a complete polygon representation from a Fusion 360 profile.
 
+    This function handles curves that may be oriented in either direction by checking
+    continuity and using the appropriate endpoint when curves are reversed.
+
     Args:
         profile: Fusion 360 Profile object
         arc_segments: Number of segments for arc approximation
@@ -121,61 +124,163 @@ def extract_profile_polygon(profile: adsk.fusion.Profile, arc_segments: int = 16
     for loop_idx in range(profile.profileLoops.count):
         loop = profile.profileLoops.item(loop_idx)
         points = []
+        last_end = None  # Track the end point of the previous curve for continuity
 
-        for curve_idx in range(loop.profileCurves.count):
+        curve_count = loop.profileCurves.count
+        for curve_idx in range(curve_count):
             curve = loop.profileCurves.item(curve_idx)
             entity = curve.sketchEntity
+            curve_geom = curve.geometry
 
-            if isinstance(entity, adsk.fusion.SketchLine):
-                # Add line start point (end point will be added by next segment)
-                start = entity.startSketchPoint.geometry
-                points.append((start.x * CM_TO_MM, start.y * CM_TO_MM))
+            try:
+                evaluator = curve_geom.evaluator
+                (ret, start_param, end_param) = evaluator.getParameterExtents()
 
-            elif isinstance(entity, adsk.fusion.SketchArc):
-                center = entity.centerSketchPoint.geometry
-                arc_points = approximate_arc_points(
-                    center.x * CM_TO_MM,
-                    center.y * CM_TO_MM,
-                    entity.radius * CM_TO_MM,
-                    entity.startAngle,
-                    entity.endAngle,
-                    arc_segments
-                )
-                # Don't add the last point as it will be the start of next curve
-                points.extend(arc_points[:-1])
+                if not ret:
+                    continue
 
-            elif isinstance(entity, adsk.fusion.SketchCircle):
-                center = entity.centerSketchPoint.geometry
-                circle_points = approximate_arc_points(
-                    center.x * CM_TO_MM,
-                    center.y * CM_TO_MM,
-                    entity.radius * CM_TO_MM,
-                    0,
-                    2 * math.pi,
-                    arc_segments * 2
-                )
-                points.extend(circle_points[:-1])
+                # Get both start and end points
+                (ret_s, start_pt) = evaluator.getPointAtParameter(start_param)
+                (ret_e, end_pt) = evaluator.getPointAtParameter(end_param)
 
-            elif isinstance(entity, adsk.fusion.SketchEllipse):
-                center = entity.centerSketchPoint.geometry
-                ellipse_points = approximate_ellipse_points(
-                    center.x * CM_TO_MM,
-                    center.y * CM_TO_MM,
-                    entity.majorRadius * CM_TO_MM,
-                    entity.minorRadius * CM_TO_MM,
-                    0,  # TODO: Extract rotation
-                    arc_segments * 2
-                )
-                points.extend(ellipse_points)
+                if not ret_s or not ret_e:
+                    continue
 
-            elif isinstance(entity, (adsk.fusion.SketchFittedSpline, adsk.fusion.SketchFixedSpline)):
-                spline_points = approximate_spline_points(entity, arc_segments * 2)
-                points.extend(spline_points[:-1])
+                start_xy = (start_pt.x * CM_TO_MM, start_pt.y * CM_TO_MM)
+                end_xy = (end_pt.x * CM_TO_MM, end_pt.y * CM_TO_MM)
+
+                # Check if curve is reversed (end connects to last_end instead of start)
+                is_reversed = False
+                if last_end is not None:
+                    dist_start = math.sqrt((start_xy[0] - last_end[0])**2 + (start_xy[1] - last_end[1])**2)
+                    dist_end = math.sqrt((end_xy[0] - last_end[0])**2 + (end_xy[1] - last_end[1])**2)
+                    is_reversed = dist_end < dist_start
+
+                if isinstance(entity, adsk.fusion.SketchLine):
+                    # For lines, add the connecting point
+                    if is_reversed:
+                        points.append(end_xy)
+                        last_end = start_xy
+                    else:
+                        points.append(start_xy)
+                        last_end = end_xy
+
+                elif isinstance(entity, adsk.fusion.SketchArc):
+                    # Sample points along the arc in the correct direction
+                    param_span = end_param - start_param
+                    arc_pts = []
+                    for i in range(arc_segments):
+                        t = start_param + (i / arc_segments) * param_span
+                        (ret, pt) = evaluator.getPointAtParameter(t)
+                        if ret:
+                            arc_pts.append((pt.x * CM_TO_MM, pt.y * CM_TO_MM))
+
+                    if is_reversed:
+                        arc_pts.reverse()
+
+                    points.extend(arc_pts)
+                    last_end = end_xy if not is_reversed else start_xy
+
+                elif isinstance(entity, adsk.fusion.SketchCircle):
+                    center = entity.centerSketchPoint.geometry
+                    circle_points = approximate_arc_points(
+                        center.x * CM_TO_MM,
+                        center.y * CM_TO_MM,
+                        entity.radius * CM_TO_MM,
+                        0,
+                        2 * math.pi,
+                        arc_segments * 2
+                    )
+                    points.extend(circle_points[:-1])
+                    last_end = circle_points[-2] if circle_points else None
+
+                elif isinstance(entity, adsk.fusion.SketchEllipse):
+                    center = entity.centerSketchPoint.geometry
+                    ellipse_points = approximate_ellipse_points(
+                        center.x * CM_TO_MM,
+                        center.y * CM_TO_MM,
+                        entity.majorRadius * CM_TO_MM,
+                        entity.minorRadius * CM_TO_MM,
+                        0,
+                        arc_segments * 2
+                    )
+                    points.extend(ellipse_points)
+                    last_end = ellipse_points[-1] if ellipse_points else None
+
+                elif isinstance(entity, (adsk.fusion.SketchFittedSpline, adsk.fusion.SketchFixedSpline)):
+                    param_span = end_param - start_param
+                    num_samples = arc_segments * 2
+                    spline_pts = []
+                    for i in range(num_samples):
+                        t = start_param + (i / num_samples) * param_span
+                        (ret, pt) = evaluator.getPointAtParameter(t)
+                        if ret:
+                            spline_pts.append((pt.x * CM_TO_MM, pt.y * CM_TO_MM))
+
+                    if is_reversed:
+                        spline_pts.reverse()
+
+                    points.extend(spline_pts)
+                    last_end = end_xy if not is_reversed else start_xy
+
+                else:
+                    # Unknown curve type - sample it
+                    param_span = end_param - start_param
+                    curve_pts = []
+                    for i in range(arc_segments):
+                        t = start_param + (i / arc_segments) * param_span
+                        (ret, pt) = evaluator.getPointAtParameter(t)
+                        if ret:
+                            curve_pts.append((pt.x * CM_TO_MM, pt.y * CM_TO_MM))
+
+                    if is_reversed:
+                        curve_pts.reverse()
+
+                    points.extend(curve_pts)
+                    last_end = end_xy if not is_reversed else start_xy
+
+            except Exception:
+                # Fallback
+                try:
+                    if isinstance(entity, adsk.fusion.SketchLine):
+                        start = entity.startSketchPoint.geometry
+                        end = entity.endSketchPoint.geometry
+                        start_xy = (start.x * CM_TO_MM, start.y * CM_TO_MM)
+                        end_xy = (end.x * CM_TO_MM, end.y * CM_TO_MM)
+
+                        # Check continuity
+                        if last_end is not None:
+                            dist_start = math.sqrt((start_xy[0] - last_end[0])**2 + (start_xy[1] - last_end[1])**2)
+                            dist_end = math.sqrt((end_xy[0] - last_end[0])**2 + (end_xy[1] - last_end[1])**2)
+                            if dist_end < dist_start:
+                                points.append(end_xy)
+                                last_end = start_xy
+                            else:
+                                points.append(start_xy)
+                                last_end = end_xy
+                        else:
+                            points.append(start_xy)
+                            last_end = end_xy
+
+                    elif isinstance(entity, adsk.fusion.SketchArc):
+                        center = entity.centerSketchPoint.geometry
+                        arc_points = approximate_arc_points(
+                            center.x * CM_TO_MM,
+                            center.y * CM_TO_MM,
+                            entity.radius * CM_TO_MM,
+                            entity.startAngle,
+                            entity.endAngle,
+                            arc_segments
+                        )
+                        points.extend(arc_points[:-1])
+                        last_end = arc_points[-2] if len(arc_points) > 1 else None
+                except Exception:
+                    pass
 
         # Remove duplicate consecutive points
         cleaned_points = remove_duplicate_points(points)
 
-        # First loop is outer boundary, rest are holes
+        # Assign to outer or holes based on loop type
         if loop.isOuter:
             result['outer'] = cleaned_points
         else:

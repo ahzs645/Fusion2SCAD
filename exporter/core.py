@@ -272,6 +272,39 @@ class SCADExporter:
                     profile = profiles if isinstance(profiles, adsk.fusion.Profile) else (profiles.item(0) if profiles.count > 0 else None)
 
                     if profile:
+                        # Debug: Export profile curve details
+                        profile_debug = {
+                            'loop_count': profile.profileLoops.count,
+                            'loops': []
+                        }
+                        for loop_idx in range(profile.profileLoops.count):
+                            loop = profile.profileLoops.item(loop_idx)
+                            loop_data = {
+                                'is_outer': loop.isOuter,
+                                'curve_count': loop.profileCurves.count,
+                                'curves': []
+                            }
+                            for curve_idx in range(loop.profileCurves.count):
+                                curve = loop.profileCurves.item(curve_idx)
+                                entity_type = type(curve.sketchEntity).__name__
+                                curve_data = {'index': curve_idx, 'type': entity_type}
+                                try:
+                                    curve_geom = curve.geometry
+                                    evaluator = curve_geom.evaluator
+                                    (ret, start_param, end_param) = evaluator.getParameterExtents()
+                                    if ret:
+                                        (ret, start_pt) = evaluator.getPointAtParameter(start_param)
+                                        (ret2, end_pt) = evaluator.getPointAtParameter(end_param)
+                                        if ret:
+                                            curve_data['start'] = {'x': round(start_pt.x * 10, 2), 'y': round(start_pt.y * 10, 2)}
+                                        if ret2:
+                                            curve_data['end'] = {'x': round(end_pt.x * 10, 2), 'y': round(end_pt.y * 10, 2)}
+                                except:
+                                    pass
+                                loop_data['curves'].append(curve_data)
+                            profile_debug['loops'].append(loop_data)
+                        feature_data['details']['profile_curves'] = profile_debug
+
                         sketch = profile.parentSketch
                         if sketch:
                             transform = sketch.transform

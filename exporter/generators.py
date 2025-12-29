@@ -214,8 +214,13 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
                         lines.append(f"{indent});")
                     else:
                         lines.append(f"{indent}linear_extrude(height={height})")
-                        for poly_line in polygon_code.split('\n'):
-                            lines.append(f"{indent}    {poly_line}")
+                        poly_lines = polygon_code.split('\n')
+                        for i, poly_line in enumerate(poly_lines):
+                            if i == len(poly_lines) - 1:
+                                # Add semicolon to last line
+                                lines.append(f"{indent}    {poly_line};")
+                            else:
+                                lines.append(f"{indent}    {poly_line}")
                 except:
                     lines.append(f"{indent}// Complex profile - manual adjustment needed")
                     lines.append(f"{indent}linear_extrude(height={height})")

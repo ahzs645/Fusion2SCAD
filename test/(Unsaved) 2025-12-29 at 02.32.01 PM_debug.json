@@ -1,0 +1,748 @@
+{
+  "design_name": "(Unsaved)",
+  "parameters": {},
+  "features": [
+    {
+      "index": 0,
+      "name": "Side",
+      "type": "Sketch",
+      "details": {
+        "profile_count": 1,
+        "curve_count": 4
+      }
+    },
+    {
+      "index": 1,
+      "name": "Bottom",
+      "type": "Sketch",
+      "details": {
+        "profile_count": 1,
+        "curve_count": 4
+      }
+    },
+    {
+      "index": 2,
+      "name": "Backplate",
+      "type": "Sketch",
+      "details": {
+        "profile_count": 1,
+        "curve_count": 18
+      }
+    },
+    {
+      "index": 3,
+      "name": "Side (1)",
+      "type": "ExtrudeFeature",
+      "details": {
+        "profile_curves": {
+          "loop_count": 1,
+          "loops": [
+            {
+              "is_outer": true,
+              "curve_count": 4,
+              "curves": [
+                {
+                  "index": 0,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 75.0,
+                    "y": -25.0
+                  },
+                  "end": {
+                    "x": 0.0,
+                    "y": -25.0
+                  }
+                },
+                {
+                  "index": 1,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 75.0,
+                    "y": 0.0
+                  },
+                  "end": {
+                    "x": 75.0,
+                    "y": -25.0
+                  }
+                },
+                {
+                  "index": 2,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 0.0,
+                    "y": 0.0
+                  },
+                  "end": {
+                    "x": 75.0,
+                    "y": 0.0
+                  }
+                },
+                {
+                  "index": 3,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 0.0,
+                    "y": -25.0
+                  },
+                  "end": {
+                    "x": 0.0,
+                    "y": 0.0
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "sketch_name": "Side",
+        "sketch_origin": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "transform": {
+          "origin": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "x_axis": {
+            "x": 1.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "y_axis": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": -1.0
+          },
+          "z_axis": {
+            "x": 0.0,
+            "y": 1.0,
+            "z": 0.0
+          }
+        },
+        "reference_plane": "ConstructionPlane",
+        "plane_normal": {
+          "x": 0.0,
+          "y": 1.0,
+          "z": 0.0
+        },
+        "plane_origin": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "height_cm": 0.29,
+        "height_mm": 2.9,
+        "end_face_normal": {
+          "x": 0.0,
+          "y": 1.0,
+          "z": 0.0
+        },
+        "bodies": [
+          {
+            "name": "Rail",
+            "bbox_min": {
+              "x": 0.0,
+              "y": -12.100000000000001,
+              "z": 0.0
+            },
+            "bbox_max": {
+              "x": 75.0,
+              "y": 22.0,
+              "z": 32.65
+            }
+          }
+        ],
+        "operation": "NewBodyFeatureOperation"
+      }
+    },
+    {
+      "index": 4,
+      "name": "Bottom (1)",
+      "type": "ExtrudeFeature",
+      "details": {
+        "profile_curves": {
+          "loop_count": 1,
+          "loops": [
+            {
+              "is_outer": true,
+              "curve_count": 4,
+              "curves": [
+                {
+                  "index": 0,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 0.0,
+                    "y": 22.0
+                  },
+                  "end": {
+                    "x": 0.0,
+                    "y": 0.0
+                  }
+                },
+                {
+                  "index": 1,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 0.0,
+                    "y": 0.0
+                  },
+                  "end": {
+                    "x": 75.0,
+                    "y": 0.0
+                  }
+                },
+                {
+                  "index": 2,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 75.0,
+                    "y": 0.0
+                  },
+                  "end": {
+                    "x": 75.0,
+                    "y": 22.0
+                  }
+                },
+                {
+                  "index": 3,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 75.0,
+                    "y": 22.0
+                  },
+                  "end": {
+                    "x": 0.0,
+                    "y": 22.0
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "sketch_name": "Bottom",
+        "sketch_origin": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "transform": {
+          "origin": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "x_axis": {
+            "x": 1.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "y_axis": {
+            "x": 0.0,
+            "y": 1.0,
+            "z": 0.0
+          },
+          "z_axis": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 1.0
+          }
+        },
+        "reference_plane": "ConstructionPlane",
+        "plane_normal": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 1.0
+        },
+        "plane_origin": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "height_cm": 0.29,
+        "height_mm": 2.9,
+        "start_face_normal": {
+          "x": 0.0,
+          "y": 1.0,
+          "z": 0.0
+        },
+        "end_face_normal": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 1.0
+        },
+        "bodies": [
+          {
+            "name": "Rail",
+            "bbox_min": {
+              "x": 0.0,
+              "y": -12.100000000000001,
+              "z": 0.0
+            },
+            "bbox_max": {
+              "x": 75.0,
+              "y": 22.0,
+              "z": 32.65
+            }
+          }
+        ],
+        "operation": "JoinFeatureOperation"
+      }
+    },
+    {
+      "index": 5,
+      "name": "Backplate (1)",
+      "type": "ExtrudeFeature",
+      "details": {
+        "profile_curves": {
+          "loop_count": 1,
+          "loops": [
+            {
+              "is_outer": true,
+              "curve_count": 14,
+              "curves": [
+                {
+                  "index": 0,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": -8.1,
+                    "y": 12.55
+                  },
+                  "end": {
+                    "x": -4.7,
+                    "y": 12.55
+                  }
+                },
+                {
+                  "index": 1,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": -4.7,
+                    "y": 12.55
+                  },
+                  "end": {
+                    "x": -4.7,
+                    "y": 2.25
+                  }
+                },
+                {
+                  "index": 2,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": -4.7,
+                    "y": 2.25
+                  },
+                  "end": {
+                    "x": 0.0,
+                    "y": 2.25
+                  }
+                },
+                {
+                  "index": 3,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 0.0,
+                    "y": 2.25
+                  },
+                  "end": {
+                    "x": 0.0,
+                    "y": 32.65
+                  }
+                },
+                {
+                  "index": 4,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 0.0,
+                    "y": 32.65
+                  },
+                  "end": {
+                    "x": -12.1,
+                    "y": 32.65
+                  }
+                },
+                {
+                  "index": 5,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": -12.1,
+                    "y": 32.65
+                  },
+                  "end": {
+                    "x": -12.1,
+                    "y": 22.65
+                  }
+                },
+                {
+                  "index": 6,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": -12.1,
+                    "y": 22.65
+                  },
+                  "end": {
+                    "x": -8.1,
+                    "y": 22.65
+                  }
+                },
+                {
+                  "index": 7,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": -8.1,
+                    "y": 22.65
+                  },
+                  "end": {
+                    "x": -8.1,
+                    "y": 28.15
+                  }
+                },
+                {
+                  "index": 8,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": -8.1,
+                    "y": 28.15
+                  },
+                  "end": {
+                    "x": -4.7,
+                    "y": 28.15
+                  }
+                },
+                {
+                  "index": 9,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": -4.7,
+                    "y": 28.15
+                  },
+                  "end": {
+                    "x": -4.7,
+                    "y": 17.05
+                  }
+                },
+                {
+                  "index": 10,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": -4.7,
+                    "y": 17.05
+                  },
+                  "end": {
+                    "x": -12.1,
+                    "y": 17.05
+                  }
+                },
+                {
+                  "index": 11,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": -12.1,
+                    "y": 7.05
+                  },
+                  "end": {
+                    "x": -12.1,
+                    "y": 17.05
+                  }
+                },
+                {
+                  "index": 12,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": -12.1,
+                    "y": 7.05
+                  },
+                  "end": {
+                    "x": -8.1,
+                    "y": 7.05
+                  }
+                },
+                {
+                  "index": 13,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": -8.1,
+                    "y": 12.55
+                  },
+                  "end": {
+                    "x": -8.1,
+                    "y": 7.05
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "sketch_name": "Backplate",
+        "sketch_origin": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "transform": {
+          "origin": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "x_axis": {
+            "x": 0.0,
+            "y": 1.0,
+            "z": 0.0
+          },
+          "y_axis": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 1.0
+          },
+          "z_axis": {
+            "x": 1.0,
+            "y": 0.0,
+            "z": 0.0
+          }
+        },
+        "reference_plane": "ConstructionPlane",
+        "plane_normal": {
+          "x": 1.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "plane_origin": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "height_cm": 0.29,
+        "height_mm": 2.9,
+        "end_face_normal": {
+          "x": 1.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "bodies": [
+          {
+            "name": "Rail",
+            "bbox_min": {
+              "x": 0.0,
+              "y": -12.100000000000001,
+              "z": 0.0
+            },
+            "bbox_max": {
+              "x": 75.0,
+              "y": 22.0,
+              "z": 32.65
+            }
+          }
+        ],
+        "operation": "JoinFeatureOperation"
+      }
+    },
+    {
+      "index": 6,
+      "name": "Fillet1",
+      "type": "FilletFeature",
+      "details": {}
+    },
+    {
+      "index": 7,
+      "name": "Screw Hole",
+      "type": "Sketch",
+      "details": {
+        "profile_count": 1,
+        "curve_count": 6
+      }
+    },
+    {
+      "index": 8,
+      "name": "Hole1",
+      "type": "HoleFeature",
+      "details": {
+        "diameter": 4.5,
+        "hole_type": "CountersinkHole",
+        "position": {
+          "x": 33.71901608658778,
+          "y": 0.0,
+          "z": 12.181745181350985
+        }
+      }
+    },
+    {
+      "index": 9,
+      "name": "Bottom Support",
+      "type": "Sketch",
+      "details": {
+        "profile_count": 2,
+        "curve_count": 8
+      }
+    },
+    {
+      "index": 10,
+      "name": "Support Extrude",
+      "type": "ExtrudeFeature",
+      "details": {
+        "profile_curves": {
+          "loop_count": 1,
+          "loops": [
+            {
+              "is_outer": true,
+              "curve_count": 4,
+              "curves": [
+                {
+                  "index": 0,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 67.5,
+                    "y": -15.0
+                  },
+                  "end": {
+                    "x": 72.5,
+                    "y": -15.0
+                  }
+                },
+                {
+                  "index": 1,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 67.5,
+                    "y": -20.0
+                  },
+                  "end": {
+                    "x": 67.5,
+                    "y": -15.0
+                  }
+                },
+                {
+                  "index": 2,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 72.5,
+                    "y": -20.0
+                  },
+                  "end": {
+                    "x": 67.5,
+                    "y": -20.0
+                  }
+                },
+                {
+                  "index": 3,
+                  "type": "SketchLine",
+                  "start": {
+                    "x": 72.5,
+                    "y": -15.0
+                  },
+                  "end": {
+                    "x": 72.5,
+                    "y": -20.0
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "sketch_name": "Bottom Support",
+        "sketch_origin": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "transform": {
+          "origin": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "x_axis": {
+            "x": 1.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "y_axis": {
+            "x": 0.0,
+            "y": -1.0,
+            "z": 0.0
+          },
+          "z_axis": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": -1.0
+          }
+        },
+        "reference_plane": "BRepFace",
+        "plane_normal": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": -1.0
+        },
+        "plane_origin": {
+          "x": 7.5,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "height_cm": 0.15000000000000002,
+        "height_mm": 1.5000000000000002,
+        "start_face_normal": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": -1.0
+        },
+        "end_face_normal": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": -1.0
+        },
+        "bodies": [
+          {
+            "name": "Bottom Support",
+            "bbox_min": {
+              "x": 67.50000108033419,
+              "y": 15.000000223517418,
+              "z": -1.5000000000000002
+            },
+            "bbox_max": {
+              "x": 72.50000108033419,
+              "y": 20.000000298023224,
+              "z": 0.0
+            }
+          }
+        ],
+        "operation": "NewBodyFeatureOperation"
+      }
+    },
+    {
+      "index": 11,
+      "name": "Fillet2",
+      "type": "FilletFeature",
+      "details": {}
+    }
+  ],
+  "bodies": [
+    {
+      "name": "Rail",
+      "bbox_min": {
+        "x": 0.0,
+        "y": -12.100000000000001,
+        "z": 0.0
+      },
+      "bbox_max": {
+        "x": 75.0,
+        "y": 22.0,
+        "z": 32.65
+      }
+    },
+    {
+      "name": "Bottom Support",
+      "bbox_min": {
+        "x": 67.50000108033419,
+        "y": 15.000000223517418,
+        "z": -1.5000000000000002
+      },
+      "bbox_max": {
+        "x": 72.50000108033419,
+        "y": 20.000000298023224,
+        "z": 0.0
+      }
+    }
+  ],
+  "sketches": []
+}
