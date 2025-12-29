@@ -872,32 +872,30 @@ class SCADExporter:
                 # Disable 3D Fillet/Chamfer application for now as it applies globally to shapes
                 # causing incorrect geometry (e.g. rounding all edges of a cube).
                 # 2D Sketch fillets are still handled by analyze_profile.
-                """
-                elif isinstance(entity, adsk.fusion.FilletFeature):
-                    info = self.analyze_fillet_feature(entity)
-                    # Associate fillet with affected bodies
-                    for body_token in info['affected_bodies']:
-                        if body_token in body_modifiers:
-                            # Use the largest fillet radius if multiple
-                            body_modifiers[body_token]['rounding'] = max(
-                                body_modifiers[body_token]['rounding'],
-                                info['radius']
-                            )
-                        else:
-                            body_modifiers[body_token] = {'rounding': info['radius'], 'chamfer': 0}
-
-                elif isinstance(entity, adsk.fusion.ChamferFeature):
-                    info = self.analyze_chamfer_feature(entity)
-                    # Associate chamfer with affected bodies
-                    for body_token in info['affected_bodies']:
-                        if body_token in body_modifiers:
-                            body_modifiers[body_token]['chamfer'] = max(
-                                body_modifiers[body_token]['chamfer'],
-                                info['distance']
-                            )
-                        else:
-                            body_modifiers[body_token] = {'rounding': 0, 'chamfer': info['distance']}
-                """
+                # elif isinstance(entity, adsk.fusion.FilletFeature):
+                #     info = self.analyze_fillet_feature(entity)
+                #     # Associate fillet with affected bodies
+                #     for body_token in info['affected_bodies']:
+                #         if body_token in body_modifiers:
+                #             # Use the largest fillet radius if multiple
+                #             body_modifiers[body_token]['rounding'] = max(
+                #                 body_modifiers[body_token]['rounding'],
+                #                 info['radius']
+                #             )
+                #         else:
+                #             body_modifiers[body_token] = {'rounding': info['radius'], 'chamfer': 0}
+                #
+                # elif isinstance(entity, adsk.fusion.ChamferFeature):
+                #     info = self.analyze_chamfer_feature(entity)
+                #     # Associate chamfer with affected bodies
+                #     for body_token in info['affected_bodies']:
+                #         if body_token in body_modifiers:
+                #             body_modifiers[body_token]['chamfer'] = max(
+                #                 body_modifiers[body_token]['chamfer'],
+                #                 info['distance']
+                #             )
+                #         else:
+                #             body_modifiers[body_token] = {'rounding': 0, 'chamfer': info['distance']}
 
                 elif isinstance(entity, adsk.fusion.Sketch):
                     # Sketches are processed as part of features that use them
