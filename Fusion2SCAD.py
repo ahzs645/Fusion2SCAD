@@ -477,6 +477,33 @@ class SCADExporter:
 
         return result
 
+    def _get_rotation_matrix_from_axis(self, axis: adsk.core.Vector3D) -> list:
+        """Construct a rotation matrix (4x4) aligning Z to the given axis"""
+        # Ensure normalized
+        z_vec = axis.copy()
+        z_vec.normalize()
+        
+        # Pick arbitrary vector not parallel to Z
+        if abs(z_vec.x) < 0.9:
+            ref = adsk.core.Vector3D.create(1, 0, 0)
+        else:
+            ref = adsk.core.Vector3D.create(0, 1, 0)
+            
+        # Construct basis vectors
+        x_vec = ref.crossProduct(z_vec)
+        x_vec.normalize()
+        
+        y_vec = z_vec.crossProduct(x_vec)
+        y_vec.normalize()
+        
+        # Build 4x4 matrix (basis vectors as columns)
+        return [
+            [x_vec.x, y_vec.x, z_vec.x, 0],
+            [x_vec.y, y_vec.y, z_vec.y, 0],
+            [x_vec.z, y_vec.z, z_vec.z, 0],
+            [0, 0, 0, 1]
+        ]
+
     def analyze_hole_feature(self, feature: adsk.fusion.HoleFeature) -> dict:
         """Analyze a hole feature by inspecting its geometry"""
         result = {
@@ -484,8 +511,7 @@ class SCADExporter:
             'diameter': 0,
             'depth': 50,
             'positions': [],
-            'rotation': (0, 0, 0),
-            'axis': (0, 0, 1)
+            'matrix': None  # Store 4x4 rotation matrix
         }
 
         try:
@@ -501,7 +527,6 @@ class SCADExporter:
                 result['depth'] = 200 # Sufficiently large for most parts
 
             # Determine position and orientation
-            # Prefer explicit position from feature if available
             start_pos = None
             if feature.position:
                 p = feature.position
@@ -516,7 +541,6 @@ class SCADExporter:
                     origin = geom.origin
                     axis = geom.axis
                     
-                    # If we didn't get a position from the feature, use the geometry origin
                     if not start_pos:
                         start_pos = (
                             origin.x * CM_TO_MM,
@@ -524,12 +548,10 @@ class SCADExporter:
                             origin.z * CM_TO_MM
                         )
                     
-                    # Store rotation (calculate once)
-                    if result['rotation'] == (0, 0, 0):
-                        result['axis'] = (axis.x, axis.y, axis.z)
-                        result['rotation'] = self._normal_to_rotation(axis.x, axis.y, axis.z)
+                    # Compute matrix once
+                    if result['matrix'] is None:
+                        result['matrix'] = self._get_rotation_matrix_from_axis(axis)
                         
-                    # Stop after finding the first valid cylinder to avoid duplicates from counterbores
                     break
             
             if start_pos:
@@ -547,28 +569,25 @@ class SCADExporter:
         diameter = self._format_value(feature_info['diameter'])
         radius = self._format_value(feature_info['diameter'] / 2)
         depth = feature_info['depth']
-        rx, ry, rz = feature_info['rotation']
+        matrix = feature_info.get('matrix')
         
         lines.append(f"// {feature_name}")
         
         for x, y, z in feature_info['positions']:
-            # Create a cutter that is slightly longer to avoid z-fighting
-            # We shift it 'back' by epsilon and increase length by 2*epsilon
             epsilon = 1.0 
             total_h = self._format_value(depth + epsilon)
             
-            # Note: cylinder orientation is tricky. 
-            # We assume the rotation aligns the cylinder axis correctly.
-            # We anchor at TOP to cut "down" from the point, or BOTTOM to cut "up"?
-            # Standard Fusion holes usually go "into" the material (negative normal).
-            # If we anchor at CENTER, we need to know the midpoint.
-            # Let's try anchoring at BOTTOM (base) but shift Z by -epsilon
-            
             lines.append(f"translate([{self._format_value(x)}, {self._format_value(y)}, {self._format_value(z)}])")
-            if rx != 0 or ry != 0 or rz != 0:
-                lines.append(f"    rotate([{self._format_value(rx)}, {self._format_value(ry)}, {self._format_value(rz)}])")
             
-            # Translate 'down' slightly along Z (local) to start the cut before the surface
+            if matrix:
+                # Format matrix for multmatrix
+                matrix_str = "[\n"
+                for row in matrix:
+                    row_str = ", ".join(self._format_value(v) for v in row)
+                    matrix_str += f"        [{row_str}],\n"
+                matrix_str = matrix_str.rstrip(",\n") + "\n    ]"
+                lines.append(f"    multmatrix({matrix_str})")
+            
             lines.append(f"    translate([0, 0, -{epsilon}])")
             lines.append(f"    cyl(h={total_h}, r={radius}, anchor=BOTTOM);")
             
