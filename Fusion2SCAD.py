@@ -869,6 +869,10 @@ class SCADExporter:
                     features_data.append((entity, feature_name, info, 'hole'))
                     # Holes are usually subtractive, don't create bodies to track modifiers for
 
+                # Disable 3D Fillet/Chamfer application for now as it applies globally to shapes
+                # causing incorrect geometry (e.g. rounding all edges of a cube).
+                # 2D Sketch fillets are still handled by analyze_profile.
+                """
                 elif isinstance(entity, adsk.fusion.FilletFeature):
                     info = self.analyze_fillet_feature(entity)
                     # Associate fillet with affected bodies
@@ -893,6 +897,7 @@ class SCADExporter:
                             )
                         else:
                             body_modifiers[body_token] = {'rounding': 0, 'chamfer': info['distance']}
+                """
 
                 elif isinstance(entity, adsk.fusion.Sketch):
                     # Sketches are processed as part of features that use them
