@@ -542,7 +542,12 @@
       "index": 6,
       "name": "Fillet1",
       "type": "FilletFeature",
-      "details": {}
+      "details": {
+        "edge_set_count": 2,
+        "edge_set_type": "ConstantRadiusFilletEdgeSet",
+        "radius_mm": 0.3,
+        "error": "3 : Didn't roll editing feature back."
+      }
     },
     {
       "index": 7,
@@ -713,7 +718,12 @@
       "index": 11,
       "name": "Fillet2",
       "type": "FilletFeature",
-      "details": {}
+      "details": {
+        "edge_set_count": 1,
+        "edge_set_type": "ConstantRadiusFilletEdgeSet",
+        "radius_mm": 0.10000000000000002,
+        "error": "3 : Didn't roll editing feature back."
+      }
     }
   ],
   "bodies": [

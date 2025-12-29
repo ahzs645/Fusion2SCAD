@@ -79,9 +79,11 @@ class SCADExporter:
         timeline = self.design.timeline
 
         # PASS 1: Collect all features and associate modifiers
+        # Use body NAMES instead of entityToken for matching, as tokens change
+        # when bodies are modified by subsequent features
         features_data = []
-        feature_to_bodies = {}
-        body_modifiers = {}
+        feature_to_body_name = {}  # Maps feature index to body name
+        body_modifiers = {}  # Maps body name to modifiers
 
         for i in range(timeline.count):
             item = timeline.item(i)
@@ -99,10 +101,15 @@ class SCADExporter:
 
                     try:
                         for body in entity.bodies:
-                            token = body.entityToken
-                            feature_to_bodies[len(features_data) - 1] = token
-                            if token not in body_modifiers:
-                                body_modifiers[token] = {'rounding': 0, 'chamfer': 0}
+                            body_name = body.name
+                            feature_to_body_name[len(features_data) - 1] = body_name
+                            if body_name not in body_modifiers:
+                                body_modifiers[body_name] = {
+                                    'rounding': 0,
+                                    'chamfer': 0,
+                                    'rounding_edges': set(),
+                                    'chamfer_edges': set()
+                                }
                     except:
                         pass
 
@@ -112,10 +119,15 @@ class SCADExporter:
 
                     try:
                         for body in entity.bodies:
-                            token = body.entityToken
-                            feature_to_bodies[len(features_data) - 1] = token
-                            if token not in body_modifiers:
-                                body_modifiers[token] = {'rounding': 0, 'chamfer': 0}
+                            body_name = body.name
+                            feature_to_body_name[len(features_data) - 1] = body_name
+                            if body_name not in body_modifiers:
+                                body_modifiers[body_name] = {
+                                    'rounding': 0,
+                                    'chamfer': 0,
+                                    'rounding_edges': set(),
+                                    'chamfer_edges': set()
+                                }
                     except:
                         pass
 
@@ -123,30 +135,45 @@ class SCADExporter:
                     info = analyze_hole_feature(entity)
                     features_data.append((entity, feature_name, info, 'hole'))
 
-                # Disable 3D Fillet/Chamfer application for now as it applies globally to shapes
-                # causing incorrect geometry (e.g. rounding all edges of a cube).
-                # 2D Sketch fillets are still handled by analyze_profile.
-                # elif isinstance(entity, adsk.fusion.FilletFeature):
-                #     info = analyze_fillet_feature(entity)
-                #     for body_token in info['affected_bodies']:
-                #         if body_token in body_modifiers:
-                #             body_modifiers[body_token]['rounding'] = max(
-                #                 body_modifiers[body_token]['rounding'],
-                #                 info['radius']
-                #             )
-                #         else:
-                #             body_modifiers[body_token] = {'rounding': info['radius'], 'chamfer': 0}
-                #
-                # elif isinstance(entity, adsk.fusion.ChamferFeature):
-                #     info = analyze_chamfer_feature(entity)
-                #     for body_token in info['affected_bodies']:
-                #         if body_token in body_modifiers:
-                #             body_modifiers[body_token]['chamfer'] = max(
-                #                 body_modifiers[body_token]['chamfer'],
-                #                 info['distance']
-                #             )
-                #         else:
-                #             body_modifiers[body_token] = {'rounding': 0, 'chamfer': info['distance']}
+                elif isinstance(entity, adsk.fusion.FilletFeature):
+                    info = analyze_fillet_feature(entity)
+                    for body_name in info['affected_body_names']:
+                        if body_name not in body_modifiers:
+                            body_modifiers[body_name] = {
+                                'rounding': 0,
+                                'chamfer': 0,
+                                'rounding_edges': set(),
+                                'chamfer_edges': set()
+                            }
+                        # Update rounding radius (take max if multiple fillets)
+                        body_modifiers[body_name]['rounding'] = max(
+                            body_modifiers[body_name]['rounding'],
+                            info['radius']
+                        )
+                        # Add edge types for selective rounding
+                        body_modifiers[body_name]['rounding_edges'].update(
+                            info.get('edge_types', set())
+                        )
+
+                elif isinstance(entity, adsk.fusion.ChamferFeature):
+                    info = analyze_chamfer_feature(entity)
+                    for body_name in info['affected_body_names']:
+                        if body_name not in body_modifiers:
+                            body_modifiers[body_name] = {
+                                'rounding': 0,
+                                'chamfer': 0,
+                                'rounding_edges': set(),
+                                'chamfer_edges': set()
+                            }
+                        # Update chamfer distance (take max if multiple chamfers)
+                        body_modifiers[body_name]['chamfer'] = max(
+                            body_modifiers[body_name]['chamfer'],
+                            info['distance']
+                        )
+                        # Add edge types for selective chamfering
+                        body_modifiers[body_name]['chamfer_edges'].update(
+                            info.get('edge_types', set())
+                        )
 
                 elif isinstance(entity, adsk.fusion.Sketch):
                     pass
@@ -157,16 +184,28 @@ class SCADExporter:
         # PASS 2: Generate SCAD code with modifiers applied
         current_ops = {'union': [], 'difference': [], 'intersection': []}
 
+        default_modifiers = {
+            'rounding': 0,
+            'chamfer': 0,
+            'rounding_edges': set(),
+            'chamfer_edges': set()
+        }
+
         for idx, (entity, feature_name, info, feature_type) in enumerate(features_data):
             try:
-                body_token = feature_to_bodies.get(idx)
-                modifiers = body_modifiers.get(body_token, {'rounding': 0, 'chamfer': 0})
+                body_name = feature_to_body_name.get(idx)
+                modifiers = body_modifiers.get(body_name, default_modifiers)
                 rounding = modifiers['rounding']
                 chamfer = modifiers['chamfer']
+                rounding_edges = modifiers.get('rounding_edges', set())
+                chamfer_edges = modifiers.get('chamfer_edges', set())
 
                 if feature_type == 'extrude':
-                    code = generate_extrude_scad(info, feature_name,
-                                                 rounding=rounding, chamfer=chamfer)
+                    code = generate_extrude_scad(
+                        info, feature_name,
+                        rounding=rounding, chamfer=chamfer,
+                        rounding_edges=rounding_edges, chamfer_edges=chamfer_edges
+                    )
 
                     if info['operation'] == 'new' or info['operation'] == 'union':
                         current_ops['union'].extend(code)
@@ -401,6 +440,32 @@ class SCADExporter:
                     if entity.position:
                         p = entity.position
                         feature_data['details']['position'] = {'x': p.x * CM_TO_MM, 'y': p.y * CM_TO_MM, 'z': p.z * CM_TO_MM}
+
+                elif isinstance(entity, adsk.fusion.FilletFeature):
+                    try:
+                        edge_sets = entity.edgeSets
+                        feature_data['details']['edge_set_count'] = edge_sets.count
+                        if edge_sets.count > 0:
+                            edge_set = edge_sets.item(0)
+                            feature_data['details']['edge_set_type'] = type(edge_set).__name__
+                            if isinstance(edge_set, adsk.fusion.ConstantRadiusFilletEdgeSet):
+                                feature_data['details']['radius_mm'] = edge_set.radius.value * CM_TO_MM
+
+                        # Try to get affected bodies from fillet faces (more reliable)
+                        body_names = set()
+                        try:
+                            faces = entity.faces
+                            feature_data['details']['face_count'] = faces.count
+                            for j in range(faces.count):
+                                face = faces.item(j)
+                                if face.body:
+                                    body_names.add(face.body.name)
+                        except:
+                            pass
+
+                        feature_data['details']['affected_bodies'] = list(body_names)
+                    except Exception as e:
+                        feature_data['details']['error'] = str(e)
 
                 elif isinstance(entity, adsk.fusion.Sketch):
                     feature_data['details']['profile_count'] = entity.profiles.count

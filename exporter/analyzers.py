@@ -341,52 +341,176 @@ def analyze_hole_feature(feature: adsk.fusion.HoleFeature) -> dict:
     return result
 
 
+def classify_edge(edge, body_bbox_min_z, body_bbox_max_z) -> str:
+    """Classify an edge as TOP, BOTTOM, Z (vertical), or None.
+
+    Returns one of: 'TOP', 'BOTTOM', 'Z', or None if unclassifiable.
+    """
+    try:
+        geom = edge.geometry
+        evaluator = geom.evaluator
+
+        # Get start and end points of the edge
+        ret, start_param, end_param = evaluator.getParameterExtents()
+        if not ret:
+            return None
+
+        ret, start_pt = evaluator.getPointAtParameter(start_param)
+        ret2, end_pt = evaluator.getPointAtParameter(end_param)
+        if not ret or not ret2:
+            return None
+
+        # Calculate edge direction vector
+        dx = abs(end_pt.x - start_pt.x)
+        dy = abs(end_pt.y - start_pt.y)
+        dz = abs(end_pt.z - start_pt.z)
+
+        tolerance = 0.001  # 0.01mm tolerance
+
+        # Check if edge is vertical (parallel to Z axis)
+        if dx < tolerance and dy < tolerance and dz > tolerance:
+            return 'Z'
+
+        # Check if edge is horizontal (lies in XY plane)
+        if dz < tolerance:
+            # Get the Z position of this edge
+            edge_z = (start_pt.z + end_pt.z) / 2
+
+            # Compare to body bounds (with small tolerance)
+            z_tolerance = 0.01  # 0.1mm
+
+            if abs(edge_z - body_bbox_max_z) < z_tolerance:
+                return 'TOP'
+            elif abs(edge_z - body_bbox_min_z) < z_tolerance:
+                return 'BOTTOM'
+
+        return None
+    except:
+        return None
+
+
 def analyze_fillet_feature(feature: adsk.fusion.FilletFeature) -> dict:
-    """Analyze a fillet feature and track which bodies it affects"""
+    """Analyze a fillet feature and track which bodies it affects.
+
+    Classifies edges into BOSL2 edge selector categories:
+    - 'Z': vertical edges
+    - 'TOP': horizontal edges on top face
+    - 'BOTTOM': horizontal edges on bottom face
+    """
     result = {
         'type': 'fillet',
         'radius': 0,
         'edges': [],
-        'affected_bodies': set()
+        'edge_types': set(),  # Set of edge types: 'Z', 'TOP', 'BOTTOM'
+        'affected_bodies': set(),  # Entity tokens (legacy)
+        'affected_body_names': set()  # Body names (more stable)
     }
 
+    # Get radius from edge sets
     edge_sets = feature.edgeSets
     if edge_sets.count > 0:
         edge_set = edge_sets.item(0)
         if isinstance(edge_set, adsk.fusion.ConstantRadiusFilletEdgeSet):
             result['radius'] = edge_set.radius.value * CM_TO_MM
+
+    # Get affected bodies from faces (more reliable than edges)
+    try:
+        faces = feature.faces
+        for i in range(faces.count):
+            face = faces.item(i)
+            if face.body:
+                result['affected_body_names'].add(face.body.name)
+                result['affected_bodies'].add(face.body.entityToken)
+    except:
+        pass
+
+    # Try to get edge types from edges (may fail due to timeline issues)
+    if edge_sets.count > 0:
+        edge_set = edge_sets.item(0)
+        if isinstance(edge_set, adsk.fusion.ConstantRadiusFilletEdgeSet):
             try:
                 edges = edge_set.edges
+
+                # Collect body bounding boxes for edge classification
+                body_bounds = {}
+                for body_name in result['affected_body_names']:
+                    # Get bounds from design bodies
+                    pass  # We'll skip edge classification if edges aren't accessible
+
+                # Classify each edge
                 for edge in edges:
                     body = edge.body
                     if body:
-                        result['affected_bodies'].add(body.entityToken)
+                        bbox = body.boundingBox
+                        edge_type = classify_edge(
+                            edge,
+                            bbox.minPoint.z,
+                            bbox.maxPoint.z
+                        )
+                        if edge_type:
+                            result['edge_types'].add(edge_type)
             except:
+                # Edges not accessible, that's OK - we still have body names
                 pass
 
     return result
 
 
 def analyze_chamfer_feature(feature: adsk.fusion.ChamferFeature) -> dict:
-    """Analyze a chamfer feature and track which bodies it affects"""
+    """Analyze a chamfer feature and track which bodies it affects.
+
+    Classifies edges into BOSL2 edge selector categories:
+    - 'Z': vertical edges
+    - 'TOP': horizontal edges on top face
+    - 'BOTTOM': horizontal edges on bottom face
+    """
     result = {
         'type': 'chamfer',
         'distance': 0,
-        'affected_bodies': set()
+        'edge_types': set(),  # Set of edge types: 'Z', 'TOP', 'BOTTOM'
+        'affected_bodies': set(),  # Entity tokens (legacy)
+        'affected_body_names': set()  # Body names (more stable)
     }
 
+    # Get distance from edge sets
     edge_sets = feature.edgeSets
     if edge_sets.count > 0:
         edge_set = edge_sets.item(0)
         if isinstance(edge_set, adsk.fusion.EqualDistanceChamferEdgeSet):
             result['distance'] = edge_set.distance.value * CM_TO_MM
+
+    # Get affected bodies from faces (more reliable than edges)
+    try:
+        faces = feature.faces
+        for i in range(faces.count):
+            face = faces.item(i)
+            if face.body:
+                result['affected_body_names'].add(face.body.name)
+                result['affected_bodies'].add(face.body.entityToken)
+    except:
+        pass
+
+    # Try to get edge types from edges (may fail due to timeline issues)
+    if edge_sets.count > 0:
+        edge_set = edge_sets.item(0)
+        if isinstance(edge_set, adsk.fusion.EqualDistanceChamferEdgeSet):
             try:
                 edges = edge_set.edges
+
+                # Classify each edge
                 for edge in edges:
                     body = edge.body
                     if body:
-                        result['affected_bodies'].add(body.entityToken)
+                        bbox = body.boundingBox
+                        edge_type = classify_edge(
+                            edge,
+                            bbox.minPoint.z,
+                            bbox.maxPoint.z
+                        )
+                        if edge_type:
+                            result['edge_types'].add(edge_type)
             except:
+                # Edges not accessible, that's OK - we still have body names
                 pass
 
     return result

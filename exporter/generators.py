@@ -117,11 +117,54 @@ def generate_transform_prefix(feature_info: dict, profile_center: tuple) -> tupl
     return lines, indent
 
 
+def format_edges_param(edge_types: set) -> str:
+    """Format edge types into BOSL2 edges parameter.
+
+    Args:
+        edge_types: Set containing 'Z', 'TOP', 'BOTTOM'
+
+    Returns:
+        String like '"Z"', 'TOP', '[TOP, BOTTOM]', '["Z", TOP]', etc.
+    """
+    if not edge_types:
+        return None
+
+    # Convert set to sorted list for consistent output
+    edges = []
+    if 'Z' in edge_types:
+        edges.append('"Z"')
+    if 'TOP' in edge_types:
+        edges.append('TOP')
+    if 'BOTTOM' in edge_types:
+        edges.append('BOTTOM')
+
+    if len(edges) == 1:
+        return edges[0]
+    else:
+        return f"[{', '.join(edges)}]"
+
+
 def generate_extrude_scad(feature_info: dict, feature_name: str,
-                          rounding: float = None, chamfer: float = None) -> list:
-    """Generate BOSL2 code for an extrusion with optional rounding/chamfer"""
+                          rounding: float = None, chamfer: float = None,
+                          rounding_edges: set = None, chamfer_edges: set = None) -> list:
+    """Generate BOSL2 code for an extrusion with optional rounding/chamfer.
+
+    Args:
+        feature_info: Feature analysis data
+        feature_name: Name of the feature for comments
+        rounding: Fillet radius (mm)
+        chamfer: Chamfer distance (mm)
+        rounding_edges: Set of edge types for rounding ('Z', 'TOP', 'BOTTOM')
+        chamfer_edges: Set of edge types for chamfer ('Z', 'TOP', 'BOTTOM')
+    """
     lines = []
     height = format_value(feature_info['height'])
+
+    # Default to empty sets if None
+    if rounding_edges is None:
+        rounding_edges = set()
+    if chamfer_edges is None:
+        chamfer_edges = set()
 
     for profile in feature_info['profiles']:
         lines.append(f"// {feature_name} (plane: {feature_info.get('sketch_plane', 'XY')})")
@@ -131,10 +174,26 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
             cx, cy = profile['center']
 
             cyl_params = [f"h={height}", f"r={radius}"]
+            # For cylinders, use rounding1/rounding2 for selective edges
             if rounding and rounding > 0:
-                cyl_params.append(f"rounding={format_value(rounding)}")
+                if 'TOP' in rounding_edges and 'BOTTOM' in rounding_edges:
+                    cyl_params.append(f"rounding={format_value(rounding)}")
+                elif 'TOP' in rounding_edges:
+                    cyl_params.append(f"rounding2={format_value(rounding)}")
+                elif 'BOTTOM' in rounding_edges:
+                    cyl_params.append(f"rounding1={format_value(rounding)}")
+                elif not rounding_edges:
+                    # No edge info, apply to all (fallback)
+                    cyl_params.append(f"rounding={format_value(rounding)}")
             if chamfer and chamfer > 0:
-                cyl_params.append(f"chamfer={format_value(chamfer)}")
+                if 'TOP' in chamfer_edges and 'BOTTOM' in chamfer_edges:
+                    cyl_params.append(f"chamfer={format_value(chamfer)}")
+                elif 'TOP' in chamfer_edges:
+                    cyl_params.append(f"chamfer2={format_value(chamfer)}")
+                elif 'BOTTOM' in chamfer_edges:
+                    cyl_params.append(f"chamfer1={format_value(chamfer)}")
+                elif not chamfer_edges:
+                    cyl_params.append(f"chamfer={format_value(chamfer)}")
             cyl_params.append("anchor=BOTTOM")
             cyl_call = f"cyl({', '.join(cyl_params)});"
 
@@ -150,10 +209,15 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
 
             cuboid_params = [f"[{width}, {depth}, {height}]"]
             cuboid_params.append(f"rounding={sketch_rounding}")
+
+            # Combine sketch rounding edges ("Z") with any fillet edges
+            combined_edges = {'Z'}  # Sketch rounding always applies to Z edges
             if rounding and rounding > 0:
-                cuboid_params.append(f"edges=[\"Z\", TOP, BOTTOM]")
-            else:
-                cuboid_params.append(f"edges=\"Z\"")
+                combined_edges.update(rounding_edges)
+            edges_param = format_edges_param(combined_edges)
+            if edges_param:
+                cuboid_params.append(f"edges={edges_param}")
+
             if chamfer and chamfer > 0:
                 cuboid_params.append(f"chamfer={format_value(chamfer)}")
             cuboid_params.append("anchor=BOTTOM")
@@ -169,10 +233,24 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
             cx, cy = profile['center']
 
             cuboid_params = [f"[{width}, {depth}, {height}]"]
+
+            # Apply rounding with selective edges
             if rounding and rounding > 0:
                 cuboid_params.append(f"rounding={format_value(rounding)}")
+                edges_param = format_edges_param(rounding_edges)
+                if edges_param:
+                    cuboid_params.append(f"edges={edges_param}")
+
+            # Apply chamfer with selective edges
             if chamfer and chamfer > 0:
                 cuboid_params.append(f"chamfer={format_value(chamfer)}")
+                # Note: BOSL2 uses same edges param for both rounding and chamfer
+                # If both are specified, edges applies to both
+                if not rounding and chamfer_edges:
+                    edges_param = format_edges_param(chamfer_edges)
+                    if edges_param:
+                        cuboid_params.append(f"edges={edges_param}")
+
             cuboid_params.append("anchor=BOTTOM")
             cuboid_call = f"cuboid({', '.join(cuboid_params)});"
 
