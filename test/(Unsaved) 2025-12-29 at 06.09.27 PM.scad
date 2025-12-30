@@ -24,7 +24,7 @@ difference() {
         [0, -1, 0, 12.5],
         [0, 0, 0, 1]
     ])
-            cuboid([75, 25, 2.9], anchor=BOTTOM);
+            cuboid([75, 25, 2.9], rounding=0.3, anchor=BOTTOM);
         // Bottom (1) (plane: XY)
         multmatrix([
         [1, 0, 0, 37.5],
@@ -32,7 +32,7 @@ difference() {
         [0, 0, 1, 0],
         [0, 0, 0, 1]
     ])
-            cuboid([75, 22, 2.9], anchor=BOTTOM);
+            cuboid([75, 22, 2.9], rounding=0.3, anchor=BOTTOM);
         // Backplate (1) (plane: YZ)
         multmatrix([
         [0, 0, 1, 0],
@@ -40,23 +40,13 @@ difference() {
         [0, 1, 0, 0],
         [0, 0, 0, 1]
     ])
-            linear_extrude(height=2.9)
-                polygon(points=[
-                        [-8.1, 12.55],
-                        [-4.7, 12.55],
-                        [-4.7, 2.25],
-                        [0, 2.25],
-                        [0, 32.65],
-                        [-12.1, 32.65],
-                        [-12.1, 22.65],
-                        [-8.1, 22.65],
-                        [-8.1, 28.15],
-                        [-4.7, 28.15],
-                        [-4.7, 17.05],
-                        [-12.1, 17.05],
-                        [-12.1, 7.05],
-                        [-8.1, 7.05]
-                    ]);
+            // Using BOSL2 offset_sweep for rounded extrusion
+            offset_sweep(
+                [[-8.1, 12.55], [-4.7, 12.55], [-4.7, 2.25], [0, 2.25], [0, 32.65], [-12.1, 32.65], [-12.1, 22.65], [-8.1, 22.65], [-8.1, 28.15], [-4.7, 28.15], [-4.7, 17.05], [-12.1, 17.05], [-12.1, 7.05], [-8.1, 7.05]],
+                height=2.9,
+                top=os_circle(r=0.3),
+                bottom=os_circle(r=0.3)
+            );
         // Support Extrude (plane: XY)
         multmatrix([
         [1, 0, 0, 70],
@@ -64,7 +54,7 @@ difference() {
         [0, 0, -1, 0],
         [0, 0, 0, 1]
     ])
-            cuboid([5, 5, 1.5], anchor=BOTTOM);
+            cuboid([5, 5, 1.5], rounding=0.1, anchor=BOTTOM);
     }
     // Hole1 (countersink)
     translate([33.719, 0, 12.1817])

@@ -276,8 +276,15 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
                     if rounding and rounding > 0:
                         lines.append(f"{indent}// Using BOSL2 offset_sweep for rounded extrusion")
                         lines.append(f"{indent}offset_sweep(")
-                        for poly_line in polygon_code.split('\n'):
-                            lines.append(f"{indent}    {poly_line},")
+                        # offset_sweep expects a path (list of points), not polygon()
+                        # Format the points as a path array
+                        formatted_pts = []
+                        for x, y in poly_data['outer']:
+                            fx = f"{x:.4f}".rstrip('0').rstrip('.')
+                            fy = f"{y:.4f}".rstrip('0').rstrip('.')
+                            formatted_pts.append(f"[{fx}, {fy}]")
+                        points_str = ", ".join(formatted_pts)
+                        lines.append(f"{indent}    [{points_str}],")
                         lines.append(f"{indent}    height={height},")
                         lines.append(f"{indent}    top=os_circle(r={format_value(rounding)}),")
                         lines.append(f"{indent}    bottom=os_circle(r={format_value(rounding)})")
@@ -285,8 +292,14 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
                     elif chamfer and chamfer > 0:
                         lines.append(f"{indent}// Using BOSL2 offset_sweep for chamfered extrusion")
                         lines.append(f"{indent}offset_sweep(")
-                        for poly_line in polygon_code.split('\n'):
-                            lines.append(f"{indent}    {poly_line},")
+                        # offset_sweep expects a path (list of points), not polygon()
+                        formatted_pts = []
+                        for x, y in poly_data['outer']:
+                            fx = f"{x:.4f}".rstrip('0').rstrip('.')
+                            fy = f"{y:.4f}".rstrip('0').rstrip('.')
+                            formatted_pts.append(f"[{fx}, {fy}]")
+                        points_str = ", ".join(formatted_pts)
+                        lines.append(f"{indent}    [{points_str}],")
                         lines.append(f"{indent}    height={height},")
                         lines.append(f"{indent}    top=os_chamfer(height={format_value(chamfer)}),")
                         lines.append(f"{indent}    bottom=os_chamfer(height={format_value(chamfer)})")

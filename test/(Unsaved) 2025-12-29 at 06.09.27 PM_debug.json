@@ -546,7 +546,10 @@
         "edge_set_count": 2,
         "edge_set_type": "ConstantRadiusFilletEdgeSet",
         "radius_mm": 0.3,
-        "error": "3 : Didn't roll editing feature back."
+        "face_count": 88,
+        "affected_bodies": [
+          "Rail"
+        ]
       }
     },
     {
@@ -722,7 +725,10 @@
         "edge_set_count": 1,
         "edge_set_type": "ConstantRadiusFilletEdgeSet",
         "radius_mm": 0.10000000000000002,
-        "error": "3 : Didn't roll editing feature back."
+        "face_count": 20,
+        "affected_bodies": [
+          "Bottom Support"
+        ]
       }
     }
   ],
