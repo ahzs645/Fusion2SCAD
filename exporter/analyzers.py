@@ -160,6 +160,42 @@ def analyze_extrude_feature(feature: adsk.fusion.ExtrudeFeature) -> dict:
     extent_def = feature.extentOne
     if isinstance(extent_def, adsk.fusion.DistanceExtentDefinition):
         result['height'] = extent_def.distance.value * CM_TO_MM
+    elif isinstance(extent_def, adsk.fusion.ThroughAllExtentDefinition):
+        # Through All - estimate from body bounding box
+        try:
+            bodies = feature.bodies
+            if bodies and bodies.count > 0:
+                body = bodies.item(0)
+                bbox = body.boundingBox
+                # Use Z extent as height (assuming XY plane extrusion)
+                result['height'] = (bbox.maxPoint.z - bbox.minPoint.z) * CM_TO_MM
+                result['extent_type'] = 'through_all'
+        except:
+            pass
+    elif isinstance(extent_def, adsk.fusion.ToEntityExtentDefinition):
+        # To Object/Face - estimate from body bounding box
+        try:
+            bodies = feature.bodies
+            if bodies and bodies.count > 0:
+                body = bodies.item(0)
+                bbox = body.boundingBox
+                result['height'] = (bbox.maxPoint.z - bbox.minPoint.z) * CM_TO_MM
+                result['extent_type'] = 'to_entity'
+        except:
+            pass
+
+    # Fallback: if height still not set, try to get from body bounding box
+    if 'height' not in result or result.get('height') is None:
+        try:
+            bodies = feature.bodies
+            if bodies and bodies.count > 0:
+                body = bodies.item(0)
+                bbox = body.boundingBox
+                # Estimate height from bounding box Z extent
+                result['height'] = (bbox.maxPoint.z - bbox.minPoint.z) * CM_TO_MM
+                result['extent_type'] = 'estimated'
+        except:
+            pass
 
     # Check for symmetric extrusion
     if feature.extentTwo:

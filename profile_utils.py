@@ -182,17 +182,87 @@ def extract_profile_polygon(profile: adsk.fusion.Profile, arc_segments: int = 16
                     last_end = end_xy if not is_reversed else start_xy
 
                 elif isinstance(entity, adsk.fusion.SketchCircle):
-                    center = entity.centerSketchPoint.geometry
-                    circle_points = approximate_arc_points(
-                        center.x * CM_TO_MM,
-                        center.y * CM_TO_MM,
-                        entity.radius * CM_TO_MM,
-                        0,
-                        2 * math.pi,
-                        arc_segments * 2
-                    )
-                    points.extend(circle_points[:-1])
-                    last_end = circle_points[-2] if circle_points else None
+                    # Check if this is a full circle (single curve in loop) or partial (multi-curve loop)
+                    if curve_count == 1:
+                        # Single circle - use full circle
+                        center = entity.centerSketchPoint.geometry
+                        circle_points = approximate_arc_points(
+                            center.x * CM_TO_MM,
+                            center.y * CM_TO_MM,
+                            entity.radius * CM_TO_MM,
+                            0,
+                            2 * math.pi,
+                            arc_segments * 2
+                        )
+                        points.extend(circle_points[:-1])
+                        last_end = circle_points[-2] if circle_points else None
+                    else:
+                        # Part of multi-curve loop - need to find arc portion
+                        # Use last_end to determine where arc starts, then find where it ends
+                        center = entity.centerSketchPoint.geometry
+                        cx = center.x * CM_TO_MM
+                        cy = center.y * CM_TO_MM
+                        radius = entity.radius * CM_TO_MM
+
+                        # Collect all endpoints from OTHER curves in this loop
+                        # to find the two points that connect to this circle
+                        connection_points = []
+                        for other_idx in range(curve_count):
+                            if other_idx == curve_idx:
+                                continue
+                            other_curve = loop.profileCurves.item(other_idx)
+                            try:
+                                other_eval = other_curve.geometry.evaluator
+                                (_, os, oe) = other_eval.getParameterExtents()
+                                (_, other_start) = other_eval.getPointAtParameter(os)
+                                (_, other_end) = other_eval.getPointAtParameter(oe)
+
+                                # Check if these points are on or near the circle
+                                for pt in [other_start, other_end]:
+                                    px, py = pt.x * CM_TO_MM, pt.y * CM_TO_MM
+                                    dist_to_center = math.sqrt((px - cx)**2 + (py - cy)**2)
+                                    if abs(dist_to_center - radius) < 0.1:  # Within tolerance
+                                        connection_points.append((px, py))
+                            except:
+                                pass
+
+                        # Remove duplicates
+                        unique_connections = []
+                        for pt in connection_points:
+                            is_dup = False
+                            for upt in unique_connections:
+                                if math.sqrt((pt[0] - upt[0])**2 + (pt[1] - upt[1])**2) < 0.1:
+                                    is_dup = True
+                                    break
+                            if not is_dup:
+                                unique_connections.append(pt)
+
+                        if len(unique_connections) >= 2:
+                            # Find which connection point is closer to last_end (that's our start)
+                            if last_end is not None:
+                                unique_connections.sort(key=lambda p: math.sqrt((p[0] - last_end[0])**2 + (p[1] - last_end[1])**2))
+
+                            arc_start = unique_connections[0]
+                            arc_end = unique_connections[1]
+
+                            # Calculate angles
+                            start_angle = math.atan2(arc_start[1] - cy, arc_start[0] - cx)
+                            end_angle = math.atan2(arc_end[1] - cy, arc_end[0] - cx)
+
+                            # Generate arc (try both directions and pick shorter one that connects)
+                            arc_pts = approximate_arc_points(cx, cy, radius, start_angle, end_angle, arc_segments * 2)
+
+                            points.extend(arc_pts[:-1])
+                            last_end = arc_pts[-1] if arc_pts else last_end
+                        else:
+                            # Fallback - use full circle
+                            circle_points = approximate_arc_points(
+                                cx, cy, radius,
+                                0, 2 * math.pi,
+                                arc_segments * 2
+                            )
+                            points.extend(circle_points[:-1])
+                            last_end = circle_points[-2] if circle_points else None
 
                 elif isinstance(entity, adsk.fusion.SketchEllipse):
                     center = entity.centerSketchPoint.geometry
@@ -280,6 +350,9 @@ def extract_profile_polygon(profile: adsk.fusion.Profile, arc_segments: int = 16
         # Remove duplicate consecutive points
         cleaned_points = remove_duplicate_points(points)
 
+        # Remove self-intersecting loops (non-consecutive duplicate points)
+        cleaned_points = remove_self_intersections(cleaned_points)
+
         # Assign to outer or holes based on loop type
         if loop.isOuter:
             result['outer'] = cleaned_points
@@ -302,6 +375,53 @@ def remove_duplicate_points(points: list, tolerance: float = 0.001) -> list:
             cleaned.append(pt)
 
     return cleaned
+
+
+def remove_self_intersections(points: list, tolerance: float = 0.1) -> list:
+    """
+    Remove self-intersecting loops caused by duplicate non-consecutive points.
+
+    When a point appears twice in the polygon (non-consecutively), it creates
+    a self-intersecting "spike". This function detects such cases and removes
+    the loop between the duplicate points.
+
+    Args:
+        points: List of (x, y) tuples
+        tolerance: Distance tolerance for considering points as duplicates
+
+    Returns:
+        Cleaned list of points without self-intersections
+    """
+    if len(points) < 4:
+        return points
+
+    # Build a map of points to their indices
+    # We'll find points that appear more than once
+    iterations = 0
+    max_iterations = 10  # Prevent infinite loops
+
+    while iterations < max_iterations:
+        iterations += 1
+        found_duplicate = False
+
+        for i in range(len(points)):
+            for j in range(i + 2, len(points)):  # Start from i+2 to skip consecutive
+                dist = math.sqrt((points[i][0] - points[j][0])**2 +
+                               (points[i][1] - points[j][1])**2)
+                if dist < tolerance:
+                    # Found a duplicate - remove the points between them
+                    # Keep points[0:i+1] and points[j+1:]
+                    # This removes the "spike" loop
+                    points = points[:i+1] + points[j+1:]
+                    found_duplicate = True
+                    break
+            if found_duplicate:
+                break
+
+        if not found_duplicate:
+            break
+
+    return points
 
 
 def format_polygon_scad(points: list, precision: int = 4) -> str:

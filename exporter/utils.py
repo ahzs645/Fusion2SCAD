@@ -7,6 +7,79 @@ import math
 CM_TO_MM = 10.0
 
 
+class WarningsCollector:
+    """Collects warnings during SCAD generation for consolidated reporting."""
+
+    def __init__(self):
+        self.warnings = []
+        self.errors = []
+
+    def add_warning(self, feature_name: str, message: str, category: str = "constraint"):
+        """Add a warning message.
+
+        Args:
+            feature_name: Name of the feature (e.g., "Extrude1")
+            message: Warning description
+            category: Type of warning (constraint, skip, info)
+        """
+        self.warnings.append({
+            'feature': feature_name,
+            'message': message,
+            'category': category
+        })
+
+    def add_error(self, feature_name: str, message: str):
+        """Add an error message (feature was skipped)."""
+        self.errors.append({
+            'feature': feature_name,
+            'message': message
+        })
+
+    def has_issues(self) -> bool:
+        """Check if there are any warnings or errors."""
+        return len(self.warnings) > 0 or len(self.errors) > 0
+
+    def generate_summary(self) -> list:
+        """Generate SCAD comment lines summarizing all issues.
+
+        Returns:
+            List of comment strings for the SCAD file header
+        """
+        if not self.has_issues():
+            return []
+
+        lines = [
+            "// ============================================",
+            "// WARNINGS & NOTES",
+            "// ============================================"
+        ]
+
+        # Group by category
+        if self.errors:
+            lines.append("//")
+            lines.append("// ERRORS (features skipped):")
+            for err in self.errors:
+                lines.append(f"//   - {err['feature']}: {err['message']}")
+
+        constraint_warnings = [w for w in self.warnings if w['category'] == 'constraint']
+        if constraint_warnings:
+            lines.append("//")
+            lines.append("// CONSTRAINT ADJUSTMENTS:")
+            for warn in constraint_warnings:
+                lines.append(f"//   - {warn['feature']}: {warn['message']}")
+
+        other_warnings = [w for w in self.warnings if w['category'] not in ('constraint',)]
+        if other_warnings:
+            lines.append("//")
+            lines.append("// OTHER NOTES:")
+            for warn in other_warnings:
+                lines.append(f"//   - {warn['feature']}: {warn['message']}")
+
+        lines.append("//")
+        lines.append("")
+        return lines
+
+
 def sanitize_name(name: str) -> str:
     """Convert Fusion parameter name to valid OpenSCAD variable name"""
     sanitized = ''.join(c if c.isalnum() or c == '_' else '_' for c in name)

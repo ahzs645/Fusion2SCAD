@@ -4,7 +4,7 @@
 import adsk.core
 import adsk.fusion
 
-from .utils import CM_TO_MM, sanitize_name, format_value
+from .utils import CM_TO_MM, sanitize_name, format_value, WarningsCollector
 from .analyzers import (
     analyze_extrude_feature,
     analyze_revolve_feature,
@@ -33,6 +33,7 @@ class SCADExporter:
         self.feature_map = {}
         self.body_to_feature = {}
         self.feature_modifiers = {}
+        self.warnings = WarningsCollector()
 
     def indent(self):
         return "    " * self.indent_level
@@ -179,6 +180,7 @@ class SCADExporter:
                     pass
 
             except Exception as e:
+                self.warnings.add_error(feature_name, f"analysis failed: {str(e)}")
                 scad_code.append(f"// Error analyzing {feature_name}: {str(e)}")
 
         # PASS 2: Generate SCAD code with modifiers applied
@@ -204,7 +206,8 @@ class SCADExporter:
                     code = generate_extrude_scad(
                         info, feature_name,
                         rounding=rounding, chamfer=chamfer,
-                        rounding_edges=rounding_edges, chamfer_edges=chamfer_edges
+                        rounding_edges=rounding_edges, chamfer_edges=chamfer_edges,
+                        warnings=self.warnings
                     )
 
                     if info['operation'] == 'new' or info['operation'] == 'union':
@@ -223,6 +226,7 @@ class SCADExporter:
                     current_ops['difference'].extend(code)
 
             except Exception as e:
+                self.warnings.add_error(feature_name, f"generation failed: {str(e)}")
                 scad_code.append(f"// Error generating {feature_name}: {str(e)}")
 
         # Combine boolean operations
@@ -256,6 +260,14 @@ class SCADExporter:
         self.extract_parameters()
         all_lines.extend(generate_parameters_section(self.parameters))
 
+        # Process geometry first so warnings are collected
+        geometry_code = self.process_timeline()
+
+        # Add warnings summary if there are any issues
+        warnings_summary = self.warnings.generate_summary()
+        if warnings_summary:
+            all_lines.extend(warnings_summary)
+
         all_lines.extend([
             "// ============================================",
             "// Geometry (exported from Fusion 360 features)",
@@ -263,7 +275,6 @@ class SCADExporter:
             ""
         ])
 
-        geometry_code = self.process_timeline()
         all_lines.extend(geometry_code)
 
         return '\n'.join(all_lines)

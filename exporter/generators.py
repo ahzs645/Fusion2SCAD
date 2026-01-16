@@ -5,7 +5,7 @@ import sys
 import os
 import math
 
-from .utils import CM_TO_MM, format_value
+from .utils import CM_TO_MM, format_value, WarningsCollector
 
 # Try to import profile_utils
 try:
@@ -20,6 +20,33 @@ try:
     PROFILE_UTILS_AVAILABLE = True
 except ImportError:
     PROFILE_UTILS_AVAILABLE = False
+
+
+def calculate_max_inset(points: list) -> float:
+    """Calculate the maximum safe inset radius for a polygon path.
+
+    This prevents offset_sweep from creating degenerate geometry when
+    the rounding radius is too large for the profile.
+
+    Args:
+        points: List of (x, y) tuples defining the polygon path
+
+    Returns:
+        Maximum safe inset radius (conservative estimate)
+    """
+    if not points or len(points) < 3:
+        return 0
+
+    # Calculate bounding box
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    width = max(xs) - min(xs)
+    height = max(ys) - min(ys)
+
+    # Maximum safe inset is approximately half the minimum dimension
+    # Apply 0.8 safety factor to prevent edge cases
+    min_dim = min(width, height)
+    return (min_dim / 2) * 0.8
 
 
 def generate_header() -> list:
@@ -146,7 +173,8 @@ def format_edges_param(edge_types: set) -> str:
 
 def generate_extrude_scad(feature_info: dict, feature_name: str,
                           rounding: float = None, chamfer: float = None,
-                          rounding_edges: set = None, chamfer_edges: set = None) -> list:
+                          rounding_edges: set = None, chamfer_edges: set = None,
+                          warnings: WarningsCollector = None) -> list:
     """Generate BOSL2 code for an extrusion with optional rounding/chamfer.
 
     Args:
@@ -156,9 +184,13 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
         chamfer: Chamfer distance (mm)
         rounding_edges: Set of edge types for rounding ('Z', 'TOP', 'BOTTOM')
         chamfer_edges: Set of edge types for chamfer ('Z', 'TOP', 'BOTTOM')
+        warnings: Optional WarningsCollector for consolidated reporting
     """
     lines = []
-    height = format_value(feature_info['height'])
+    raw_height = feature_info['height']
+    height = format_value(raw_height)
+    # For cuboid/cyl, we need absolute height (BOSL2 doesn't accept negative sizes)
+    abs_height = format_value(abs(raw_height))
 
     # Default to empty sets if None
     if rounding_edges is None:
@@ -173,27 +205,73 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
             radius = format_value(profile['radius'])
             cx, cy = profile['center']
 
-            cyl_params = [f"h={height}", f"r={radius}"]
+            cyl_params = [f"h={abs_height}", f"r={radius}"]
             # For cylinders, use rounding1/rounding2 for selective edges
-            if rounding and rounding > 0:
+            # Clamp rounding to fit within height
+            height_val = abs(raw_height)
+
+            has_rounding = rounding and rounding > 0
+            has_chamfer = chamfer and chamfer > 0
+
+            # Track which edges get rounding (to avoid chamfer conflict)
+            rounding_applied_top = False
+            rounding_applied_bottom = False
+
+            if has_rounding:
+                # Determine max rounding based on which edges are affected
+                both_ends = ('TOP' in rounding_edges and 'BOTTOM' in rounding_edges) or not rounding_edges
+                max_rounding = (height_val / 2 * 0.95) if both_ends else (height_val * 0.95)
+                effective_rounding = min(rounding, max_rounding)
+                if effective_rounding < rounding and warnings:
+                    warnings.add_warning(
+                        feature_name,
+                        f"rounding reduced {format_value(rounding)}->{format_value(effective_rounding)}mm (height constraint)",
+                        "constraint"
+                    )
                 if 'TOP' in rounding_edges and 'BOTTOM' in rounding_edges:
-                    cyl_params.append(f"rounding={format_value(rounding)}")
+                    cyl_params.append(f"rounding={format_value(effective_rounding)}")
+                    rounding_applied_top = rounding_applied_bottom = True
                 elif 'TOP' in rounding_edges:
-                    cyl_params.append(f"rounding2={format_value(rounding)}")
+                    cyl_params.append(f"rounding2={format_value(effective_rounding)}")
+                    rounding_applied_top = True
                 elif 'BOTTOM' in rounding_edges:
-                    cyl_params.append(f"rounding1={format_value(rounding)}")
+                    cyl_params.append(f"rounding1={format_value(effective_rounding)}")
+                    rounding_applied_bottom = True
                 elif not rounding_edges:
                     # No edge info, apply to all (fallback)
-                    cyl_params.append(f"rounding={format_value(rounding)}")
-            if chamfer and chamfer > 0:
-                if 'TOP' in chamfer_edges and 'BOTTOM' in chamfer_edges:
-                    cyl_params.append(f"chamfer={format_value(chamfer)}")
-                elif 'TOP' in chamfer_edges:
-                    cyl_params.append(f"chamfer2={format_value(chamfer)}")
-                elif 'BOTTOM' in chamfer_edges:
-                    cyl_params.append(f"chamfer1={format_value(chamfer)}")
-                elif not chamfer_edges:
-                    cyl_params.append(f"chamfer={format_value(chamfer)}")
+                    cyl_params.append(f"rounding={format_value(effective_rounding)}")
+                    rounding_applied_top = rounding_applied_bottom = True
+
+            if has_chamfer:
+                # BOSL2 cyl doesn't support rounding and chamfer on the same edge
+                # Only apply chamfer to edges that don't have rounding
+                both_ends_chamfer = ('TOP' in chamfer_edges and 'BOTTOM' in chamfer_edges) or not chamfer_edges
+                max_chamfer = (height_val / 2 * 0.95) if both_ends_chamfer else (height_val * 0.95)
+                effective_chamfer = min(chamfer, max_chamfer)
+                if effective_chamfer < chamfer and warnings:
+                    warnings.add_warning(
+                        feature_name,
+                        f"chamfer reduced {format_value(chamfer)}->{format_value(effective_chamfer)}mm (height constraint)",
+                        "constraint"
+                    )
+
+                # Determine which edges can get chamfer (no rounding conflict)
+                chamfer_top = ('TOP' in chamfer_edges or not chamfer_edges) and not rounding_applied_top
+                chamfer_bottom = ('BOTTOM' in chamfer_edges or not chamfer_edges) and not rounding_applied_bottom
+
+                if chamfer_top and chamfer_bottom:
+                    cyl_params.append(f"chamfer={format_value(effective_chamfer)}")
+                elif chamfer_top:
+                    cyl_params.append(f"chamfer2={format_value(effective_chamfer)}")
+                elif chamfer_bottom:
+                    cyl_params.append(f"chamfer1={format_value(effective_chamfer)}")
+                elif has_rounding and warnings:
+                    # Chamfer requested but all edges already have rounding
+                    warnings.add_warning(
+                        feature_name,
+                        f"chamfer skipped (BOSL2 cyl doesn't support both rounding and chamfer on same edge)",
+                        "constraint"
+                    )
             cyl_params.append("anchor=BOTTOM")
             cyl_call = f"cyl({', '.join(cyl_params)});"
 
@@ -202,13 +280,28 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
             lines.append(f"{indent}{cyl_call}")
 
         elif profile.get('is_rounded_rect'):
-            width = format_value(profile['bbox']['width'])
-            depth = format_value(profile['bbox']['height'])
-            sketch_rounding = format_value(profile['rounding'])
+            width_val = profile['bbox']['width']
+            depth_val = profile['bbox']['height']
+            height_val = abs(raw_height)
+            sketch_rounding_val = profile['rounding']
             cx, cy = profile['center']
 
-            cuboid_params = [f"[{width}, {depth}, {height}]"]
-            cuboid_params.append(f"rounding={sketch_rounding}")
+            # Clamp sketch rounding to fit cuboid dimensions
+            # BOSL2 requires rounding < min(width, depth, height) / 2
+            min_dim = min(width_val, depth_val, height_val)
+            max_rounding = min_dim / 2 * 0.95
+            effective_sketch_rounding = min(sketch_rounding_val, max_rounding)
+            if effective_sketch_rounding < sketch_rounding_val and warnings:
+                warnings.add_warning(
+                    feature_name,
+                    f"sketch rounding reduced {format_value(sketch_rounding_val)}->{format_value(effective_sketch_rounding)}mm (cuboid size constraint)",
+                    "constraint"
+                )
+
+            width = format_value(width_val)
+            depth = format_value(depth_val)
+            cuboid_params = [f"[{width}, {depth}, {abs_height}]"]
+            cuboid_params.append(f"rounding={format_value(effective_sketch_rounding)}")
 
             # Combine sketch rounding edges ("Z") with any fillet edges
             combined_edges = {'Z'}  # Sketch rounding always applies to Z edges
@@ -218,8 +311,14 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
             if edges_param:
                 cuboid_params.append(f"edges={edges_param}")
 
-            if chamfer and chamfer > 0:
-                cuboid_params.append(f"chamfer={format_value(chamfer)}")
+            # Note: BOSL2 cuboid doesn't support both rounding and chamfer
+            # Since we already have sketch rounding, skip chamfer and warn
+            if chamfer and chamfer > 0 and warnings:
+                warnings.add_warning(
+                    feature_name,
+                    f"chamfer skipped (BOSL2 cuboid doesn't support both rounding and chamfer)",
+                    "constraint"
+                )
             cuboid_params.append("anchor=BOTTOM")
             cuboid_call = f"cuboid({', '.join(cuboid_params)});"
 
@@ -228,25 +327,53 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
             lines.append(f"{indent}{cuboid_call}")
 
         elif profile['is_rectangle']:
-            width = format_value(profile['bbox']['width'])
-            depth = format_value(profile['bbox']['height'])
+            width_val = profile['bbox']['width']
+            depth_val = profile['bbox']['height']
+            height_val = abs(raw_height)
             cx, cy = profile['center']
 
-            cuboid_params = [f"[{width}, {depth}, {height}]"]
+            # Calculate max rounding/chamfer for this cuboid
+            min_dim = min(width_val, depth_val, height_val)
+            max_edge_treatment = min_dim / 2 * 0.95
 
-            # Apply rounding with selective edges
-            if rounding and rounding > 0:
-                cuboid_params.append(f"rounding={format_value(rounding)}")
+            width = format_value(width_val)
+            depth = format_value(depth_val)
+            cuboid_params = [f"[{width}, {depth}, {abs_height}]"]
+
+            # BOSL2 cuboid doesn't support both rounding and chamfer
+            # Prioritize rounding over chamfer if both are specified
+            has_rounding = rounding and rounding > 0
+            has_chamfer = chamfer and chamfer > 0
+
+            if has_rounding:
+                effective_rounding = min(rounding, max_edge_treatment)
+                if effective_rounding < rounding and warnings:
+                    warnings.add_warning(
+                        feature_name,
+                        f"rounding reduced {format_value(rounding)}->{format_value(effective_rounding)}mm (cuboid size constraint)",
+                        "constraint"
+                    )
+                cuboid_params.append(f"rounding={format_value(effective_rounding)}")
                 edges_param = format_edges_param(rounding_edges)
                 if edges_param:
                     cuboid_params.append(f"edges={edges_param}")
-
-            # Apply chamfer with selective edges
-            if chamfer and chamfer > 0:
-                cuboid_params.append(f"chamfer={format_value(chamfer)}")
-                # Note: BOSL2 uses same edges param for both rounding and chamfer
-                # If both are specified, edges applies to both
-                if not rounding and chamfer_edges:
+                # Warn if chamfer was also requested but skipped
+                if has_chamfer and warnings:
+                    warnings.add_warning(
+                        feature_name,
+                        f"chamfer skipped (BOSL2 cuboid doesn't support both rounding and chamfer)",
+                        "constraint"
+                    )
+            elif has_chamfer:
+                effective_chamfer = min(chamfer, max_edge_treatment)
+                if effective_chamfer < chamfer and warnings:
+                    warnings.add_warning(
+                        feature_name,
+                        f"chamfer reduced {format_value(chamfer)}->{format_value(effective_chamfer)}mm (cuboid size constraint)",
+                        "constraint"
+                    )
+                cuboid_params.append(f"chamfer={format_value(effective_chamfer)}")
+                if chamfer_edges:
                     edges_param = format_edges_param(chamfer_edges)
                     if edges_param:
                         cuboid_params.append(f"edges={edges_param}")
@@ -285,9 +412,26 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
                             formatted_pts.append(f"[{fx}, {fy}]")
                         points_str = ", ".join(formatted_pts)
                         lines.append(f"{indent}    [{points_str}],")
-                        lines.append(f"{indent}    height={height},")
-                        lines.append(f"{indent}    top=os_circle(r={format_value(rounding)}),")
-                        lines.append(f"{indent}    bottom=os_circle(r={format_value(rounding)})")
+                        lines.append(f"{indent}    height={abs_height},")
+                        # Clamp rounding radius based on two constraints:
+                        # 1. Height constraint: top + bottom must fit within height
+                        # 2. Path constraint: inset can't exceed profile's minimum dimension
+                        height_val = abs(raw_height)
+                        max_rounding_height = height_val / 2 * 0.95  # Leave 5% margin
+                        max_rounding_path = calculate_max_inset(poly_data['outer'])
+                        max_rounding = min(max_rounding_height, max_rounding_path)
+                        effective_rounding = min(rounding, max_rounding)
+                        if effective_rounding < rounding:
+                            reason = "height" if max_rounding_height < max_rounding_path else "profile size"
+                            if warnings:
+                                warnings.add_warning(
+                                    feature_name,
+                                    f"rounding reduced {format_value(rounding)}->{format_value(effective_rounding)}mm ({reason} constraint)",
+                                    "constraint"
+                                )
+                            lines.append(f"{indent}    // Note: rounding reduced from {format_value(rounding)} to {format_value(effective_rounding)} to fit {reason}")
+                        lines.append(f"{indent}    top=os_circle(r={format_value(effective_rounding)}),")
+                        lines.append(f"{indent}    bottom=os_circle(r={format_value(effective_rounding)})")
                         lines.append(f"{indent});")
                     elif chamfer and chamfer > 0:
                         lines.append(f"{indent}// Using BOSL2 offset_sweep for chamfered extrusion")
@@ -300,9 +444,26 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
                             formatted_pts.append(f"[{fx}, {fy}]")
                         points_str = ", ".join(formatted_pts)
                         lines.append(f"{indent}    [{points_str}],")
-                        lines.append(f"{indent}    height={height},")
-                        lines.append(f"{indent}    top=os_chamfer(height={format_value(chamfer)}),")
-                        lines.append(f"{indent}    bottom=os_chamfer(height={format_value(chamfer)})")
+                        lines.append(f"{indent}    height={abs_height},")
+                        # Clamp chamfer based on two constraints:
+                        # 1. Height constraint: top + bottom must fit within height
+                        # 2. Path constraint: inset can't exceed profile's minimum dimension
+                        height_val = abs(raw_height)
+                        max_chamfer_height = height_val / 2 * 0.95  # Leave 5% margin
+                        max_chamfer_path = calculate_max_inset(poly_data['outer'])
+                        max_chamfer = min(max_chamfer_height, max_chamfer_path)
+                        effective_chamfer = min(chamfer, max_chamfer)
+                        if effective_chamfer < chamfer:
+                            reason = "height" if max_chamfer_height < max_chamfer_path else "profile size"
+                            if warnings:
+                                warnings.add_warning(
+                                    feature_name,
+                                    f"chamfer reduced {format_value(chamfer)}->{format_value(effective_chamfer)}mm ({reason} constraint)",
+                                    "constraint"
+                                )
+                            lines.append(f"{indent}    // Note: chamfer reduced from {format_value(chamfer)} to {format_value(effective_chamfer)} to fit {reason}")
+                        lines.append(f"{indent}    top=os_chamfer(height={format_value(effective_chamfer)}),")
+                        lines.append(f"{indent}    bottom=os_chamfer(height={format_value(effective_chamfer)})")
                         lines.append(f"{indent});")
                     else:
                         lines.append(f"{indent}linear_extrude(height={height})")
