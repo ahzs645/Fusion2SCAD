@@ -21,6 +21,71 @@ try:
 except ImportError:
     PROFILE_UTILS_AVAILABLE = False
 
+def calculate_hole_center_radius(hole_points: list) -> tuple:
+    """Calculate center and radius of a circular hole from its points.
+
+    Args:
+        hole_points: List of (x, y) tuples defining the hole polygon
+
+    Returns:
+        Tuple of ((cx, cy), radius) or None if not a valid circle
+    """
+    if not hole_points or len(hole_points) < 3:
+        return None
+
+    # Calculate centroid as center
+    xs = [p[0] for p in hole_points]
+    ys = [p[1] for p in hole_points]
+    cx = sum(xs) / len(xs)
+    cy = sum(ys) / len(ys)
+
+    # Calculate average radius
+    radii = [math.sqrt((p[0] - cx)**2 + (p[1] - cy)**2) for p in hole_points]
+    avg_radius = sum(radii) / len(radii)
+
+    # Check if it's actually circular (all radii similar)
+    radius_variance = max(radii) - min(radii)
+    if radius_variance > avg_radius * 0.1:  # More than 10% variance = not circular
+        return None
+
+    return ((cx, cy), avg_radius)
+
+
+def generate_hole_cut(hole_points: list, height: str, indent: str) -> list:
+    """Generate SCAD code to cut out a hole from a solid.
+
+    Args:
+        hole_points: List of (x, y) tuples defining the hole
+        height: The extrusion height as a formatted string
+        indent: Current indentation string
+
+    Returns:
+        List of SCAD code lines for the hole cut
+    """
+    lines = []
+
+    # Try to detect if it's a circular hole
+    circle_info = calculate_hole_center_radius(hole_points)
+
+    if circle_info:
+        (cx, cy), radius = circle_info
+        # Use cylinder for circular holes (cleaner output)
+        lines.append(f"{indent}translate([{format_value(cx)}, {format_value(cy)}, -1])")
+        lines.append(f"{indent}    cyl(h={height}+2, r={format_value(radius)}, anchor=BOTTOM);")
+    else:
+        # Use linear_extrude for non-circular holes
+        formatted_pts = []
+        for x, y in hole_points:
+            fx = f"{x:.4f}".rstrip('0').rstrip('.')
+            fy = f"{y:.4f}".rstrip('0').rstrip('.')
+            formatted_pts.append(f"[{fx}, {fy}]")
+        points_str = ", ".join(formatted_pts)
+        lines.append(f"{indent}translate([0, 0, -1])")
+        lines.append(f"{indent}    linear_extrude(height={height}+2)")
+        lines.append(f"{indent}        polygon(points=[{points_str}]);")
+
+    return lines
+
 
 def calculate_max_inset(points: list) -> float:
     """Calculate the maximum safe inset radius for a polygon path.
@@ -32,9 +97,14 @@ def calculate_max_inset(points: list) -> float:
         points: List of (x, y) tuples defining the polygon path
 
     Returns:
-        Maximum safe inset radius (conservative estimate)
+        Maximum safe inset radius (conservative estimate), or 0 if path is unsuitable
     """
     if not points or len(points) < 3:
+        return 0
+
+    # Paths with only 3 points form very thin triangles that often fail with offset_sweep
+    # Require at least 4 points for offset_sweep to work reliably
+    if len(points) < 4:
         return 0
 
     # Calculate bounding box
@@ -43,10 +113,65 @@ def calculate_max_inset(points: list) -> float:
     width = max(xs) - min(xs)
     height = max(ys) - min(ys)
 
-    # Maximum safe inset is approximately half the minimum dimension
-    # Apply 0.8 safety factor to prevent edge cases
+    # Check for degenerate (very thin) profiles - aspect ratio > 10:1
+    if width > 0 and height > 0:
+        aspect_ratio = max(width, height) / min(width, height)
+        if aspect_ratio > 10:
+            # Very thin profile - skip rounding
+            return 0
+
+    # Calculate minimum distance from each vertex to all non-adjacent edges
+    # This gives a better estimate of the narrowest part of the polygon
+    min_vertex_clearance = float('inf')
+    n = len(points)
+
+    for i in range(n):
+        px, py = points[i]
+        # Check distance to all non-adjacent edges
+        for j in range(n):
+            # Skip adjacent edges (j, j+1) where j is i-1 or i
+            next_j = (j + 1) % n
+            if j == i or next_j == i or j == (i - 1) % n:
+                continue
+
+            # Calculate distance from point i to edge j->j+1
+            x1, y1 = points[j]
+            x2, y2 = points[next_j]
+
+            # Edge vector
+            edge_dx = x2 - x1
+            edge_dy = y2 - y1
+            edge_len_sq = edge_dx * edge_dx + edge_dy * edge_dy
+
+            if edge_len_sq < 1e-10:
+                continue
+
+            # Project point onto edge line
+            t = max(0, min(1, ((px - x1) * edge_dx + (py - y1) * edge_dy) / edge_len_sq))
+
+            # Closest point on edge segment
+            closest_x = x1 + t * edge_dx
+            closest_y = y1 + t * edge_dy
+
+            # Distance from vertex to closest point on edge
+            dist = math.sqrt((px - closest_x)**2 + (py - closest_y)**2)
+            min_vertex_clearance = min(min_vertex_clearance, dist)
+
+    # Also consider minimum edge-to-edge width (perpendicular distance)
     min_dim = min(width, height)
-    return (min_dim / 2) * 0.8
+
+    # Use the most conservative estimate
+    if min_vertex_clearance < float('inf') and min_vertex_clearance < min_dim:
+        # Use vertex clearance but apply strong safety factor
+        max_inset = min_vertex_clearance * 0.4
+    else:
+        # Fall back to bounding box approach with safety factor
+        max_inset = (min_dim / 2) * 0.7
+
+    # Additional safety: never allow inset larger than 1/3 of smallest bounding box dimension
+    absolute_max = min_dim / 3
+
+    return min(max_inset, absolute_max)
 
 
 def generate_header() -> list:
@@ -187,10 +312,17 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
         warnings: Optional WarningsCollector for consolidated reporting
     """
     lines = []
-    raw_height = feature_info['height']
+    raw_height = feature_info.get('height')
+
+    # Check for missing height (e.g., ToEntity extents that couldn't be resolved)
+    if raw_height is None:
+        raise ValueError(f"height could not be determined (extent type may be 'To Object' which is not fully supported)")
+
     height = format_value(raw_height)
     # For cuboid/cyl, we need absolute height (BOSL2 doesn't accept negative sizes)
     abs_height = format_value(abs(raw_height))
+    # When height is negative, use TOP anchor so geometry extends in correct direction
+    anchor = "TOP" if raw_height < 0 else "BOTTOM"
 
     # Default to empty sets if None
     if rounding_edges is None:
@@ -272,7 +404,7 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
                         f"chamfer skipped (BOSL2 cyl doesn't support both rounding and chamfer on same edge)",
                         "constraint"
                     )
-            cyl_params.append("anchor=BOTTOM")
+            cyl_params.append(f"anchor={anchor}")
             cyl_call = f"cyl({', '.join(cyl_params)});"
 
             transform_lines, indent = generate_transform_prefix(feature_info, (cx, cy))
@@ -319,7 +451,7 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
                     f"chamfer skipped (BOSL2 cuboid doesn't support both rounding and chamfer)",
                     "constraint"
                 )
-            cuboid_params.append("anchor=BOTTOM")
+            cuboid_params.append(f"anchor={anchor}")
             cuboid_call = f"cuboid({', '.join(cuboid_params)});"
 
             transform_lines, indent = generate_transform_prefix(feature_info, (cx, cy))
@@ -378,7 +510,7 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
                     if edges_param:
                         cuboid_params.append(f"edges={edges_param}")
 
-            cuboid_params.append("anchor=BOTTOM")
+            cuboid_params.append(f"anchor={anchor}")
             cuboid_call = f"cuboid({', '.join(cuboid_params)});"
 
             transform_lines, indent = generate_transform_prefix(feature_info, (cx, cy))
@@ -393,84 +525,166 @@ def generate_extrude_scad(feature_info: dict, feature_name: str,
             if PROFILE_UTILS_AVAILABLE and 'profile_obj' in profile:
                 try:
                     poly_data = extract_profile_polygon(profile['profile_obj'])
-                    if poly_data['holes']:
-                        polygon_code = format_polygon_with_holes_scad(
-                            poly_data['outer'], poly_data['holes']
-                        )
-                    else:
-                        polygon_code = format_polygon_scad(poly_data['outer'])
+                    has_holes = bool(poly_data['holes'])
 
                     if rounding and rounding > 0:
-                        lines.append(f"{indent}// Using BOSL2 offset_sweep for rounded extrusion")
-                        lines.append(f"{indent}offset_sweep(")
-                        # offset_sweep expects a path (list of points), not polygon()
-                        # Format the points as a path array
-                        formatted_pts = []
-                        for x, y in poly_data['outer']:
-                            fx = f"{x:.4f}".rstrip('0').rstrip('.')
-                            fy = f"{y:.4f}".rstrip('0').rstrip('.')
-                            formatted_pts.append(f"[{fx}, {fy}]")
-                        points_str = ", ".join(formatted_pts)
-                        lines.append(f"{indent}    [{points_str}],")
-                        lines.append(f"{indent}    height={abs_height},")
-                        # Clamp rounding radius based on two constraints:
-                        # 1. Height constraint: top + bottom must fit within height
-                        # 2. Path constraint: inset can't exceed profile's minimum dimension
+                        # Calculate effective rounding
                         height_val = abs(raw_height)
-                        max_rounding_height = height_val / 2 * 0.95  # Leave 5% margin
+                        max_rounding_height = height_val / 2 * 0.95
                         max_rounding_path = calculate_max_inset(poly_data['outer'])
                         max_rounding = min(max_rounding_height, max_rounding_path)
                         effective_rounding = min(rounding, max_rounding)
-                        if effective_rounding < rounding:
-                            reason = "height" if max_rounding_height < max_rounding_path else "profile size"
+
+                        # If effective rounding is 0 or very small, fall back to linear_extrude
+                        if effective_rounding < 0.1:
                             if warnings:
                                 warnings.add_warning(
                                     feature_name,
-                                    f"rounding reduced {format_value(rounding)}->{format_value(effective_rounding)}mm ({reason} constraint)",
+                                    f"rounding skipped (profile geometry unsuitable for offset_sweep)",
                                     "constraint"
                                 )
-                            lines.append(f"{indent}    // Note: rounding reduced from {format_value(rounding)} to {format_value(effective_rounding)} to fit {reason}")
-                        lines.append(f"{indent}    top=os_circle(r={format_value(effective_rounding)}),")
-                        lines.append(f"{indent}    bottom=os_circle(r={format_value(effective_rounding)})")
-                        lines.append(f"{indent});")
+                            # Generate simple extrusion instead
+                            if has_holes:
+                                polygon_code = format_polygon_with_holes_scad(
+                                    poly_data['outer'], poly_data['holes']
+                                )
+                            else:
+                                polygon_code = format_polygon_scad(poly_data['outer'])
+
+                            lines.append(f"{indent}// Note: rounding skipped due to profile constraints")
+                            lines.append(f"{indent}linear_extrude(height={abs_height})")
+                            poly_lines = polygon_code.split('\n')
+                            for i, poly_line in enumerate(poly_lines):
+                                if i == len(poly_lines) - 1:
+                                    lines.append(f"{indent}    {poly_line};")
+                                else:
+                                    lines.append(f"{indent}    {poly_line}")
+                        else:
+                            if effective_rounding < rounding:
+                                reason = "height" if max_rounding_height < max_rounding_path else "profile size"
+                                if warnings:
+                                    warnings.add_warning(
+                                        feature_name,
+                                        f"rounding reduced {format_value(rounding)}->{format_value(effective_rounding)}mm ({reason} constraint)",
+                                        "constraint"
+                                    )
+
+                            # If profile has holes, wrap in difference()
+                            if has_holes:
+                                lines.append(f"{indent}difference() {{")
+                                inner_indent = indent + "    "
+                            else:
+                                inner_indent = indent
+
+                            lines.append(f"{inner_indent}// Using BOSL2 offset_sweep for rounded extrusion")
+                            lines.append(f"{inner_indent}offset_sweep(")
+                            formatted_pts = []
+                            for x, y in poly_data['outer']:
+                                fx = f"{x:.4f}".rstrip('0').rstrip('.')
+                                fy = f"{y:.4f}".rstrip('0').rstrip('.')
+                                formatted_pts.append(f"[{fx}, {fy}]")
+                            points_str = ", ".join(formatted_pts)
+                            lines.append(f"{inner_indent}    [{points_str}],")
+                            lines.append(f"{inner_indent}    height={abs_height},")
+                            if effective_rounding < rounding:
+                                lines.append(f"{inner_indent}    // Note: rounding reduced from {format_value(rounding)} to {format_value(effective_rounding)} to fit {reason}")
+                            lines.append(f"{inner_indent}    top=os_circle(r={format_value(effective_rounding)}),")
+                            lines.append(f"{inner_indent}    bottom=os_circle(r={format_value(effective_rounding)})")
+                            lines.append(f"{inner_indent});")
+
+                            # Cut out holes if present
+                            if has_holes:
+                                lines.append(f"{inner_indent}// Cut out holes")
+                                for hole in poly_data['holes']:
+                                    hole_lines = generate_hole_cut(hole, abs_height, inner_indent)
+                                    lines.extend(hole_lines)
+                                lines.append(f"{indent}}}") 
                     elif chamfer and chamfer > 0:
-                        lines.append(f"{indent}// Using BOSL2 offset_sweep for chamfered extrusion")
-                        lines.append(f"{indent}offset_sweep(")
-                        # offset_sweep expects a path (list of points), not polygon()
-                        formatted_pts = []
-                        for x, y in poly_data['outer']:
-                            fx = f"{x:.4f}".rstrip('0').rstrip('.')
-                            fy = f"{y:.4f}".rstrip('0').rstrip('.')
-                            formatted_pts.append(f"[{fx}, {fy}]")
-                        points_str = ", ".join(formatted_pts)
-                        lines.append(f"{indent}    [{points_str}],")
-                        lines.append(f"{indent}    height={abs_height},")
-                        # Clamp chamfer based on two constraints:
-                        # 1. Height constraint: top + bottom must fit within height
-                        # 2. Path constraint: inset can't exceed profile's minimum dimension
+                        # Calculate effective chamfer
                         height_val = abs(raw_height)
-                        max_chamfer_height = height_val / 2 * 0.95  # Leave 5% margin
+                        max_chamfer_height = height_val / 2 * 0.95
                         max_chamfer_path = calculate_max_inset(poly_data['outer'])
-                        max_chamfer = min(max_chamfer_height, max_chamfer_path)
-                        effective_chamfer = min(chamfer, max_chamfer)
-                        if effective_chamfer < chamfer:
-                            reason = "height" if max_chamfer_height < max_chamfer_path else "profile size"
+                        max_chamfer_val = min(max_chamfer_height, max_chamfer_path)
+                        effective_chamfer = min(chamfer, max_chamfer_val)
+
+                        # If effective chamfer is 0 or very small, fall back to linear_extrude
+                        if effective_chamfer < 0.1:
                             if warnings:
                                 warnings.add_warning(
                                     feature_name,
-                                    f"chamfer reduced {format_value(chamfer)}->{format_value(effective_chamfer)}mm ({reason} constraint)",
+                                    f"chamfer skipped (profile geometry unsuitable for offset_sweep)",
                                     "constraint"
                                 )
-                            lines.append(f"{indent}    // Note: chamfer reduced from {format_value(chamfer)} to {format_value(effective_chamfer)} to fit {reason}")
-                        lines.append(f"{indent}    top=os_chamfer(height={format_value(effective_chamfer)}),")
-                        lines.append(f"{indent}    bottom=os_chamfer(height={format_value(effective_chamfer)})")
-                        lines.append(f"{indent});")
+                            # Generate simple extrusion instead
+                            if has_holes:
+                                polygon_code = format_polygon_with_holes_scad(
+                                    poly_data['outer'], poly_data['holes']
+                                )
+                            else:
+                                polygon_code = format_polygon_scad(poly_data['outer'])
+
+                            lines.append(f"{indent}// Note: chamfer skipped due to profile constraints")
+                            lines.append(f"{indent}linear_extrude(height={abs_height})")
+                            poly_lines = polygon_code.split('\n')
+                            for i, poly_line in enumerate(poly_lines):
+                                if i == len(poly_lines) - 1:
+                                    lines.append(f"{indent}    {poly_line};")
+                                else:
+                                    lines.append(f"{indent}    {poly_line}")
+                        else:
+                            if effective_chamfer < chamfer:
+                                reason = "height" if max_chamfer_height < max_chamfer_path else "profile size"
+                                if warnings:
+                                    warnings.add_warning(
+                                        feature_name,
+                                        f"chamfer reduced {format_value(chamfer)}->{format_value(effective_chamfer)}mm ({reason} constraint)",
+                                        "constraint"
+                                    )
+
+                            # If profile has holes, wrap in difference()
+                            if has_holes:
+                                lines.append(f"{indent}difference() {{")
+                                inner_indent = indent + "    "
+                            else:
+                                inner_indent = indent
+
+                            lines.append(f"{inner_indent}// Using BOSL2 offset_sweep for chamfered extrusion")
+                            lines.append(f"{inner_indent}offset_sweep(")
+                            formatted_pts = []
+                            for x, y in poly_data['outer']:
+                                fx = f"{x:.4f}".rstrip('0').rstrip('.')
+                                fy = f"{y:.4f}".rstrip('0').rstrip('.')
+                                formatted_pts.append(f"[{fx}, {fy}]")
+                            points_str = ", ".join(formatted_pts)
+                            lines.append(f"{inner_indent}    [{points_str}],")
+                            lines.append(f"{inner_indent}    height={abs_height},")
+                            if effective_chamfer < chamfer:
+                                lines.append(f"{inner_indent}    // Note: chamfer reduced from {format_value(chamfer)} to {format_value(effective_chamfer)} to fit {reason}")
+                            lines.append(f"{inner_indent}    top=os_chamfer(height={format_value(effective_chamfer)}),")
+                            lines.append(f"{inner_indent}    bottom=os_chamfer(height={format_value(effective_chamfer)})")
+                            lines.append(f"{inner_indent});")
+
+                            # Cut out holes if present
+                            if has_holes:
+                                lines.append(f"{inner_indent}// Cut out holes")
+                                for hole in poly_data['holes']:
+                                    hole_lines = generate_hole_cut(hole, abs_height, inner_indent)
+                                    lines.extend(hole_lines)
+                                lines.append(f"{indent}}}") 
                     else:
+                        # Simple extrusion without rounding/chamfer
+                        if has_holes:
+                            # Use polygon with paths for holes
+                            polygon_code = format_polygon_with_holes_scad(
+                                poly_data['outer'], poly_data['holes']
+                            )
+                        else:
+                            polygon_code = format_polygon_scad(poly_data['outer'])
+                        
                         lines.append(f"{indent}linear_extrude(height={height})")
                         poly_lines = polygon_code.split('\n')
                         for i, poly_line in enumerate(poly_lines):
                             if i == len(poly_lines) - 1:
-                                # Add semicolon to last line
                                 lines.append(f"{indent}    {poly_line};")
                             else:
                                 lines.append(f"{indent}    {poly_line}")

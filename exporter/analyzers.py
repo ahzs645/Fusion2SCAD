@@ -156,46 +156,124 @@ def analyze_extrude_feature(feature: adsk.fusion.ExtrudeFeature) -> dict:
         'rotation': None
     }
 
+    # Get the sketch plane normal to determine extrusion direction
+    extrude_normal = (0, 0, 1)  # Default to Z direction
+    try:
+        profiles = feature.profile
+        profile = profiles if isinstance(profiles, adsk.fusion.Profile) else profiles.item(0)
+        sketch = profile.parentSketch
+        if sketch and sketch.transform:
+            cs = sketch.transform.getAsCoordinateSystem()
+            _, _, _, z_axis = cs
+            extrude_normal = (z_axis.x, z_axis.y, z_axis.z)
+    except:
+        pass
+
     # Get extrusion extent
     extent_def = feature.extentOne
     if isinstance(extent_def, adsk.fusion.DistanceExtentDefinition):
         result['height'] = extent_def.distance.value * CM_TO_MM
-    elif isinstance(extent_def, adsk.fusion.ThroughAllExtentDefinition):
-        # Through All - estimate from body bounding box
+        result['extent_type'] = 'distance'
+    elif isinstance(extent_def, adsk.fusion.SymmetricExtentDefinition):
+        # Symmetric extrusion - total height is 2x the distance
         try:
-            bodies = feature.bodies
-            if bodies and bodies.count > 0:
-                body = bodies.item(0)
-                bbox = body.boundingBox
-                # Use Z extent as height (assuming XY plane extrusion)
-                result['height'] = (bbox.maxPoint.z - bbox.minPoint.z) * CM_TO_MM
-                result['extent_type'] = 'through_all'
+            result['height'] = extent_def.distance.value * CM_TO_MM * 2
+            result['extent_type'] = 'symmetric'
+            result['is_symmetric'] = True
         except:
             pass
+    elif isinstance(extent_def, adsk.fusion.ThroughAllExtentDefinition):
+        # Through All - estimate from body bounding box
+        result['extent_type'] = 'through_all'
     elif isinstance(extent_def, adsk.fusion.ToEntityExtentDefinition):
-        # To Object/Face - estimate from body bounding box
+        # To Object/Face - try multiple approaches to get height
+        result['extent_type'] = 'to_entity'
         try:
-            bodies = feature.bodies
-            if bodies and bodies.count > 0:
-                body = bodies.item(0)
-                bbox = body.boundingBox
-                result['height'] = (bbox.maxPoint.z - bbox.minPoint.z) * CM_TO_MM
-                result['extent_type'] = 'to_entity'
+            # First try: check if there's an offset value on the extent
+            if hasattr(extent_def, 'offset') and extent_def.offset:
+                result['height'] = extent_def.offset.value * CM_TO_MM
         except:
             pass
 
-    # Fallback: if height still not set, try to get from body bounding box
-    if 'height' not in result or result.get('height') is None:
+    # Try to calculate height from start/end faces if not yet determined
+    if result.get('height') is None:
+        try:
+            start_faces = feature.startFaces
+            end_faces = feature.endFaces
+            if start_faces and start_faces.count > 0 and end_faces and end_faces.count > 0:
+                start_face = start_faces.item(0)
+                end_face = end_faces.item(0)
+
+                # Get face positions along extrusion direction
+                if hasattr(start_face, 'pointOnFace') and hasattr(end_face, 'pointOnFace'):
+                    start_pt = start_face.pointOnFace
+                    end_pt = end_face.pointOnFace
+
+                    # Calculate distance along extrusion normal
+                    nx, ny, nz = extrude_normal
+                    start_proj = start_pt.x * nx + start_pt.y * ny + start_pt.z * nz
+                    end_proj = end_pt.x * nx + end_pt.y * ny + end_pt.z * nz
+                    result['height'] = abs(end_proj - start_proj) * CM_TO_MM
+                    result['extent_type'] = result.get('extent_type', 'unknown') + '_from_faces'
+        except:
+            pass
+
+    # Fallback: calculate from body bounding box extent along extrusion direction
+    if result.get('height') is None:
         try:
             bodies = feature.bodies
             if bodies and bodies.count > 0:
                 body = bodies.item(0)
                 bbox = body.boundingBox
-                # Estimate height from bounding box Z extent
-                result['height'] = (bbox.maxPoint.z - bbox.minPoint.z) * CM_TO_MM
-                result['extent_type'] = 'estimated'
+
+                # Calculate extent along extrusion normal direction
+                nx, ny, nz = extrude_normal
+                if abs(nz) > 0.9:  # Mostly Z direction
+                    result['height'] = (bbox.maxPoint.z - bbox.minPoint.z) * CM_TO_MM
+                elif abs(ny) > 0.9:  # Mostly Y direction
+                    result['height'] = (bbox.maxPoint.y - bbox.minPoint.y) * CM_TO_MM
+                elif abs(nx) > 0.9:  # Mostly X direction
+                    result['height'] = (bbox.maxPoint.x - bbox.minPoint.x) * CM_TO_MM
+                else:
+                    # General case - use Z as default
+                    result['height'] = (bbox.maxPoint.z - bbox.minPoint.z) * CM_TO_MM
+                result['extent_type'] = result.get('extent_type', 'unknown') + '_estimated'
         except:
             pass
+
+    # Additional fallback for cut operations: try to get from participating bodies
+    if result.get('height') is None:
+        try:
+            # For cut operations, check if we can get the participating bodies
+            if hasattr(feature, 'participantBodies') and feature.participantBodies:
+                for i in range(feature.participantBodies.count):
+                    body = feature.participantBodies.item(i)
+                    if body and body.boundingBox:
+                        bbox = body.boundingBox
+                        nx, ny, nz = extrude_normal
+                        if abs(nz) > 0.9:
+                            result['height'] = (bbox.maxPoint.z - bbox.minPoint.z) * CM_TO_MM
+                        elif abs(ny) > 0.9:
+                            result['height'] = (bbox.maxPoint.y - bbox.minPoint.y) * CM_TO_MM
+                        elif abs(nx) > 0.9:
+                            result['height'] = (bbox.maxPoint.x - bbox.minPoint.x) * CM_TO_MM
+                        else:
+                            result['height'] = (bbox.maxPoint.z - bbox.minPoint.z) * CM_TO_MM
+                        result['extent_type'] = 'estimated_from_participant'
+                        break
+        except:
+            pass
+
+    # Final fallback for cut operations: use "through all" approach
+    # This ensures cuts go completely through the target body when height can't be determined
+    # Also handles cases where height is 0 (which is invalid for extrusions)
+    if result.get('height') is None or result.get('height') == 0:
+        operation = get_operation_type(feature.operation)
+        if operation == 'difference':
+            # For cut operations with unknown height, use a large "through all" value
+            # This ensures the cut goes completely through any reasonable body
+            result['height'] = 200  # 200mm should cut through most parts
+            result['extent_type'] = (result.get('extent_type') or 'unknown') + '_through_all_fallback'
 
     # Check for symmetric extrusion
     if feature.extentTwo:

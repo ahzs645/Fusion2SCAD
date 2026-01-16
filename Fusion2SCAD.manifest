@@ -6,7 +6,7 @@
     "description": {
         "": "Export Fusion 360 parametric designs to OpenSCAD with BOSL2 support"
     },
-    "version": "0.8.3",
+    "version": "0.8.4",
     "runOnStartup": true,
     "supportedOS": "windows|mac",
     "editEnabled": true

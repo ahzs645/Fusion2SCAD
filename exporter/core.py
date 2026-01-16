@@ -79,6 +79,13 @@ class SCADExporter:
         scad_code = []
         timeline = self.design.timeline
 
+        # Store original timeline marker position to restore later
+        original_marker_position = None
+        try:
+            original_marker_position = timeline.markerPosition
+        except:
+            pass
+
         # PASS 1: Collect all features and associate modifiers
         # Use body NAMES instead of entityToken for matching, as tokens change
         # when bodies are modified by subsequent features
@@ -94,6 +101,13 @@ class SCADExporter:
                 continue
 
             feature_name = item.name if hasattr(item, 'name') else f"feature_{i}"
+
+            # Roll timeline to this feature's position for accurate analysis
+            try:
+                # Move timeline marker to just after this feature
+                timeline.markerPosition = i + 1
+            except:
+                pass
 
             try:
                 if isinstance(entity, adsk.fusion.ExtrudeFeature):
@@ -249,6 +263,16 @@ class SCADExporter:
             else:
                 scad_code.extend(current_ops['union'])
 
+        # Restore timeline marker to original position
+        try:
+            if original_marker_position is not None:
+                timeline.markerPosition = original_marker_position
+            else:
+                # Move to end of timeline if original position wasn't captured
+                timeline.markerPosition = timeline.count
+        except:
+            pass
+
         return scad_code
 
     def export(self) -> str:
@@ -303,11 +327,25 @@ class SCADExporter:
 
         # Export timeline features
         timeline = self.design.timeline
+
+        # Store original timeline marker position to restore later
+        original_marker_position = None
+        try:
+            original_marker_position = timeline.markerPosition
+        except:
+            pass
+
         for i in range(timeline.count):
             item = timeline.item(i)
             entity = item.entity
             if entity is None:
                 continue
+
+            # Roll timeline to this feature's position for accurate analysis
+            try:
+                timeline.markerPosition = i + 1
+            except:
+                pass
 
             feature_data = {
                 'index': i,
@@ -391,9 +429,77 @@ class SCADExporter:
                                         feature_data['details']['plane_origin'] = {'x': o.x, 'y': o.y, 'z': o.z}
 
                     extent_def = entity.extentOne
+                    # Capture extent type for debugging
+                    feature_data['details']['extent_type'] = type(extent_def).__name__
+
                     if isinstance(extent_def, adsk.fusion.DistanceExtentDefinition):
                         feature_data['details']['height_cm'] = extent_def.distance.value
                         feature_data['details']['height_mm'] = extent_def.distance.value * CM_TO_MM
+                    elif isinstance(extent_def, adsk.fusion.SymmetricExtentDefinition):
+                        try:
+                            feature_data['details']['height_cm'] = extent_def.distance.value * 2
+                            feature_data['details']['height_mm'] = extent_def.distance.value * CM_TO_MM * 2
+                            feature_data['details']['is_symmetric'] = True
+                        except:
+                            pass
+                    else:
+                        # Try to calculate height from start/end faces
+                        try:
+                            start_faces = entity.startFaces
+                            end_faces = entity.endFaces
+                            if start_faces and start_faces.count > 0 and end_faces and end_faces.count > 0:
+                                start_face = start_faces.item(0)
+                                end_face = end_faces.item(0)
+                                if hasattr(start_face, 'pointOnFace') and hasattr(end_face, 'pointOnFace'):
+                                    start_pt = start_face.pointOnFace
+                                    end_pt = end_face.pointOnFace
+                                    # Assume Z direction for now
+                                    height = abs(end_pt.z - start_pt.z)
+                                    feature_data['details']['height_cm'] = height
+                                    feature_data['details']['height_mm'] = height * CM_TO_MM
+                                    feature_data['details']['height_source'] = 'faces'
+                        except:
+                            pass
+
+                        # Fallback to body bounding box
+                        if 'height_mm' not in feature_data['details']:
+                            try:
+                                bodies = entity.bodies
+                                if bodies and bodies.count > 0:
+                                    body = bodies.item(0)
+                                    bbox = body.boundingBox
+                                    height = bbox.maxPoint.z - bbox.minPoint.z
+                                    feature_data['details']['height_cm'] = height
+                                    feature_data['details']['height_mm'] = height * CM_TO_MM
+                                    feature_data['details']['height_source'] = 'body_bbox'
+                            except:
+                                pass
+
+                        # Fallback for cut operations: use participant bodies
+                        if 'height_mm' not in feature_data['details']:
+                            try:
+                                if hasattr(entity, 'participantBodies') and entity.participantBodies:
+                                    for pb_idx in range(entity.participantBodies.count):
+                                        body = entity.participantBodies.item(pb_idx)
+                                        if body and body.boundingBox:
+                                            bbox = body.boundingBox
+                                            height = bbox.maxPoint.z - bbox.minPoint.z
+                                            feature_data['details']['height_cm'] = height
+                                            feature_data['details']['height_mm'] = height * CM_TO_MM
+                                            feature_data['details']['height_source'] = 'participant_body_bbox'
+                                            break
+                            except:
+                                pass
+
+                        # Final fallback for cut operations: use through-all estimate
+                        # Also handles cases where height is 0 (which is invalid)
+                        height_val = feature_data['details'].get('height_mm')
+                        if height_val is None or height_val == 0:
+                            op = entity.operation
+                            # Check if it's a cut operation (CutFeatureOperation = 1)
+                            if op == 1:
+                                feature_data['details']['height_mm'] = 200  # Through-all fallback
+                                feature_data['details']['height_source'] = 'through_all_fallback'
 
                     try:
                         start_faces = entity.startFaces
@@ -486,6 +592,15 @@ class SCADExporter:
                 feature_data['error'] = str(e)
 
             debug_data['features'].append(feature_data)
+
+        # Restore timeline marker to original position
+        try:
+            if original_marker_position is not None:
+                timeline.markerPosition = original_marker_position
+            else:
+                timeline.markerPosition = timeline.count
+        except:
+            pass
 
         # Export bodies from root component
         try:

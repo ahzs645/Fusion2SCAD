@@ -121,6 +121,16 @@ def extract_profile_polygon(profile: adsk.fusion.Profile, arc_segments: int = 16
         'holes': []
     }
 
+    # Check if this is a simple single-circle profile
+    # If so, don't extract holes - they belong to overlapping profiles
+    is_simple_circle = False
+    if profile.profileLoops.count >= 1:
+        outer_loop = profile.profileLoops.item(0)
+        if outer_loop.isOuter and outer_loop.profileCurves.count == 1:
+            curve = outer_loop.profileCurves.item(0)
+            if isinstance(curve.sketchEntity, adsk.fusion.SketchCircle):
+                is_simple_circle = True
+
     for loop_idx in range(profile.profileLoops.count):
         loop = profile.profileLoops.item(loop_idx)
         points = []
@@ -357,7 +367,9 @@ def extract_profile_polygon(profile: adsk.fusion.Profile, arc_segments: int = 16
         if loop.isOuter:
             result['outer'] = cleaned_points
         else:
-            result['holes'].append(cleaned_points)
+            # Skip holes for simple circle profiles - holes are handled by main profile
+            if not is_simple_circle:
+                result['holes'].append(cleaned_points)
 
     return result
 
